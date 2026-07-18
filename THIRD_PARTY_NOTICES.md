@@ -21,14 +21,13 @@ application source code.
 - Notes: Redistribution of generated data that uses this source should include
   appropriate credit to Kanji alive and the CC BY 4.0 license notice.
 
-## Tatoeba
+## pykakasi
 
-- Source: https://tatoeba.org/en/downloads
-- File used: `per_language/jpn/jpn_sentences.tsv.bz2`
-- Attribution: Tatoeba / tatoeba.org
-- Notes: Some bundled `example_sentence` values may be derived from Tatoeba
-  sentence data. When redistributing the dataset or application, confirm and
-  follow the current Tatoeba license and attribution requirements.
+- Source: https://github.com/miurahr/pykakasi
+- Purpose: Generation of hiragana readings for sentence context outside the target word
+- License: GPL-3.0-or-later (for the library itself)
+- Notes: pykakasi was used only as a dataset generation tool. Its program code
+  is not included in the generated JavaScript data bundled with this application.
 
 ## Review Note
 
