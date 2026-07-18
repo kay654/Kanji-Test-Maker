@@ -150,6 +150,10 @@ input:focus-visible {
   gap: 10px;
 }
 
+.preview-actions button {
+  white-space: nowrap;
+}
+
 .btn-history {
   min-width: 76px;
   border-color: #cbd5e1;
@@ -1232,6 +1236,75 @@ body.is-printing .print-area {
   }
 }
 
+@media screen and (min-width: 1181px) and (max-width: 1280px) {
+  .preview-toolbar {
+    gap: 8px;
+  }
+
+  .btn-zoom {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    min-height: 34px;
+  }
+
+  .preview-actions {
+    gap: 6px;
+  }
+
+  .preview-actions button {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .btn-history {
+    min-width: 72px;
+  }
+
+  .btn-toggle-answer {
+    min-width: 104px;
+  }
+
+  .btn-blue {
+    min-width: 110px;
+  }
+}
+
+@media screen and (min-width: 781px) and (max-width: 1180px) {
+  .preview-toolbar {
+    gap: 8px;
+  }
+
+  .btn-zoom {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    min-height: 34px;
+  }
+
+  .preview-actions {
+    gap: 6px;
+  }
+
+  .preview-actions .btn-history,
+  .preview-actions .btn-blue {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+
+  .preview-actions .btn-toggle-answer {
+    min-width: 104px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .preview-actions .btn-history .button-label,
+  .preview-actions .btn-blue .button-label {
+    display: none;
+  }
+}
+
 @media screen and (max-width: 1180px) {
   body {
     min-width: 760px;
@@ -1290,7 +1363,7 @@ body.is-printing .print-area {
   }
 }
 
-@media screen and (max-width: 780px), screen and (orientation: portrait) and (max-width: 920px) {
+@media screen and (max-width: 920px) {
   body {
     min-width: 0;
     height: auto;
