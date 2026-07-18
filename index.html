@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
   <header class="app-header">
@@ -48,6 +48,7 @@
           <span></span>
         </div>
         <div class="entry-list" id="entryList"></div>
+        <p class="visually-hidden" id="reorderStatus" aria-live="polite"></p>
 
         <div class="entry-actions">
           <button type="button" class="btn-add" id="addButton">
@@ -56,6 +57,9 @@
           </button>
           <button type="button" class="btn-generate" id="openRandomButton">
             ランダム生成
+          </button>
+          <button type="button" class="btn-select" id="openKanjiSelectButton">
+            漢字から選ぶ
           </button>
           <button type="button" class="btn-data" id="openDataButton">
             インポート・エクスポート
@@ -70,8 +74,16 @@
           <div class="panel-title">
             <span class="step">2</span>
             <h2>プレビュー</h2>
+            <div class="preview-zoom-controls" role="group" aria-label="プレビューの表示倍率">
+              <button type="button" class="btn-zoom" id="zoomOutButton" aria-label="プレビューを縮小" disabled>−</button>
+              <button type="button" class="btn-zoom" id="zoomInButton" aria-label="プレビューを拡大">＋</button>
+            </div>
           </div>
           <div class="preview-actions">
+            <button type="button" class="btn-history" id="openHistoryButton">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v6h6"></path><path d="M12 7v5l3 2"></path></svg>
+              履歴
+            </button>
             <button type="button" class="btn-toggle-answer" id="answerToggleButton" aria-pressed="false">
               答え表示
             </button>
@@ -87,6 +99,49 @@
   </main>
 
   <div class="print-root" id="printRoot" aria-hidden="true"></div>
+
+  <div class="modal-overlay" id="historyModal" hidden>
+    <div class="history-dialog" role="dialog" aria-modal="true" aria-labelledby="historyDialogTitle">
+      <header class="dialog-header">
+        <h2 id="historyDialogTitle">印刷履歴</h2>
+        <button type="button" class="dialog-close" id="closeHistoryButton" aria-label="閉じる">×</button>
+      </header>
+
+      <p class="history-help" id="historyHelp">印刷した問題を新しい順に最大100件保存します。</p>
+      <div class="history-list" id="historyList" aria-label="印刷履歴の一覧"></div>
+      <p class="dialog-message history-message" id="historyMessage" aria-live="polite"></p>
+
+      <footer class="dialog-footer">
+        <button type="button" class="btn-dialog-cancel" id="cancelHistoryButton">キャンセル</button>
+        <button type="button" class="btn-dialog-add" id="restoreHistoryButton" disabled>復元する</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="kanjiSelectModal" hidden>
+    <div class="kanji-select-dialog" role="dialog" aria-modal="true" aria-labelledby="kanjiSelectDialogTitle">
+      <header class="dialog-header">
+        <h2 id="kanjiSelectDialogTitle">漢字から問題を選ぶ</h2>
+        <button type="button" class="dialog-close" id="closeKanjiSelectButton" aria-label="閉じる">×</button>
+      </header>
+
+      <section class="dialog-section">
+        <label class="kanji-search-field">
+          <span>問題にしたい漢字</span>
+          <input type="text" id="kanjiSelectInput" autocomplete="off" spellcheck="false" aria-describedby="kanjiSelectHelp">
+        </label>
+        <p class="kanji-select-help" id="kanjiSelectHelp">検索する漢字が1字になると、選べる例文を表示します。</p>
+      </section>
+
+      <p class="dialog-message kanji-select-message" id="kanjiSelectMessage" aria-live="polite"></p>
+      <div class="kanji-choice-list" id="kanjiChoiceList" aria-label="例文の候補"></div>
+
+      <footer class="dialog-footer">
+        <span class="kanji-choice-note">例文を選ぶと問題一覧に追加されます。</span>
+        <button type="button" class="btn-dialog-cancel" id="cancelKanjiSelectButton">キャンセル</button>
+      </footer>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="randomModal" hidden>
     <div class="random-dialog" role="dialog" aria-modal="true" aria-labelledby="randomDialogTitle">
@@ -114,6 +169,14 @@
         </label>
       </section>
 
+      <section class="dialog-section" aria-label="生成方法">
+        <p class="dialog-label">生成方法</p>
+        <div class="random-mode-options">
+          <label><input type="radio" name="randomMode" value="replace" checked>現在の問題を置き換える</label>
+          <label><input type="radio" name="randomMode" value="append">現在の問題に追加する</label>
+        </div>
+      </section>
+
       <p class="dialog-message" id="randomMessage" aria-live="polite"></p>
 
       <footer class="dialog-footer">
@@ -135,7 +198,7 @@
           <span>CSVテキストを貼り付けてインポートできます。</span>
           <textarea id="csvTextArea" spellcheck="false"></textarea>
         </label>
-        <p class="csv-note">形式: 問題文,問題の漢字,よみがな</p>
+        <p class="csv-note">形式: 問題文,問題の漢字,よみがな,全文の読み（任意）</p>
       </section>
 
       <p class="dialog-message" id="csvMessage" aria-live="polite"></p>
@@ -148,7 +211,7 @@
     </div>
   </div>
 
-  <script src="data/kanji-data.js"></script>
-  <script src="app.js" defer></script>
+  <script src="data/kanji-writing-questions.js"></script>
+  <script src="app.js?v=2" defer></script>
 </body>
 </html>

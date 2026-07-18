@@ -1,26 +1,56 @@
 const MAX_ITEMS = 48;
 const ITEMS_PER_PAGE = 24;
 const STORAGE_KEY = "kanji-test-maker";
+const HISTORY_STORAGE_KEY = "kanji-test-maker-print-history";
+const MAX_HISTORY_ITEMS = 100;
+const PREVIEW_ZOOM_STEP = 0.08;
 
 const DEFAULT_ITEMS = [
-  { text: "", kanji: "", reading: "" }
+  { text: "", kanji: "", reading: "", sentenceReading: "" }
 ];
 
 let items = DEFAULT_ITEMS.map((item) => ({ ...item }));
 
-const SOURCE_FIELDS = [
+const SOURCE_TEXT_FIELDS = [
   "sourceWord",
   "sourceWordReading",
   "sourceTargetReading"
 ];
 
+const SOURCE_FIELDS = [
+  ...SOURCE_TEXT_FIELDS,
+  "sourceTargetSpan",
+  "sourceWordSpan",
+  "sourceReadingSegments"
+];
+
 const entryList = document.getElementById("entryList");
+const reorderStatus = document.getElementById("reorderStatus");
 const previewStage = document.getElementById("previewStage");
 const printRoot = document.getElementById("printRoot");
 const addButton = document.getElementById("addButton");
 const answerToggleButton = document.getElementById("answerToggleButton");
 const openRandomButton = document.getElementById("openRandomButton");
+const openKanjiSelectButton = document.getElementById("openKanjiSelectButton");
 const openDataButton = document.getElementById("openDataButton");
+const openHistoryButton = document.getElementById("openHistoryButton");
+const resetButton = document.getElementById("resetButton");
+const printButton = document.getElementById("printButton");
+const historyModal = document.getElementById("historyModal");
+const closeHistoryButton = document.getElementById("closeHistoryButton");
+const cancelHistoryButton = document.getElementById("cancelHistoryButton");
+const restoreHistoryButton = document.getElementById("restoreHistoryButton");
+const historyList = document.getElementById("historyList");
+const historyHelp = document.getElementById("historyHelp");
+const historyMessage = document.getElementById("historyMessage");
+const zoomOutButton = document.getElementById("zoomOutButton");
+const zoomInButton = document.getElementById("zoomInButton");
+const kanjiSelectModal = document.getElementById("kanjiSelectModal");
+const closeKanjiSelectButton = document.getElementById("closeKanjiSelectButton");
+const cancelKanjiSelectButton = document.getElementById("cancelKanjiSelectButton");
+const kanjiSelectInput = document.getElementById("kanjiSelectInput");
+const kanjiSelectMessage = document.getElementById("kanjiSelectMessage");
+const kanjiChoiceList = document.getElementById("kanjiChoiceList");
 const randomModal = document.getElementById("randomModal");
 const closeRandomButton = document.getElementById("closeRandomButton");
 const cancelRandomButton = document.getElementById("cancelRandomButton");
@@ -37,23 +67,58 @@ const importCsvButton = document.getElementById("importCsvButton");
 
 let lastFocusedElement = null;
 let showAnswers = false;
+let pointerReorder = null;
+let selectedHistoryId = null;
+let previewZoomSteps = 0;
+let previewResizeFrame = 0;
+
+function showModal(modal) {
+  lastFocusedElement = document.activeElement;
+  modal.hidden = false;
+}
+
+function hideModal(modal) {
+  modal.hidden = true;
+  if (lastFocusedElement instanceof HTMLElement) {
+    lastFocusedElement.focus();
+  }
+  lastFocusedElement = null;
+}
 
 function createEmptyItem() {
-  return { text: "", kanji: "", reading: "" };
+  return { text: "", kanji: "", reading: "", sentenceReading: "" };
 }
 
 function normalizeItem(item) {
   const normalized = {
     text: String(item.text || ""),
     kanji: String(item.kanji || ""),
-    reading: String(item.reading || "")
+    reading: String(item.reading || ""),
+    sentenceReading: String(item.sentenceReading || "")
   };
 
-  SOURCE_FIELDS.forEach((field) => {
+  SOURCE_TEXT_FIELDS.forEach((field) => {
     if (item[field] !== undefined && item[field] !== null && item[field] !== "") {
       normalized[field] = String(item[field]);
     }
   });
+
+  ["sourceTargetSpan", "sourceWordSpan"].forEach((field) => {
+    const span = item[field];
+    if (span && Number.isInteger(span.start) && Number.isInteger(span.length)) {
+      normalized[field] = { start: span.start, length: span.length };
+    }
+  });
+
+  if (Array.isArray(item.sourceReadingSegments)) {
+    normalized.sourceReadingSegments = item.sourceReadingSegments
+      .filter((segment) => segment && Number.isInteger(segment.start) && Number.isInteger(segment.length))
+      .map((segment) => ({
+        start: segment.start,
+        length: segment.length,
+        reading: String(segment.reading || "")
+      }));
+  }
 
   return normalized;
 }
@@ -81,6 +146,191 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ items }));
 }
 
+function loadPrintHistory() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
+    if (!Array.isArray(saved)) return [];
+    return saved
+      .filter((entry) => entry && typeof entry.id === "string" && Array.isArray(entry.items))
+      .slice(0, MAX_HISTORY_ITEMS)
+      .map((entry) => ({
+        id: entry.id,
+        printedAt: String(entry.printedAt || ""),
+        items: entry.items.slice(0, MAX_ITEMS).map(normalizeItem).filter(isActiveItem)
+      }))
+      .filter((entry) => entry.items.length);
+  } catch {
+    return [];
+  }
+}
+
+function savePrintHistory(history) {
+  const remaining = history.slice(0, MAX_HISTORY_ITEMS);
+  while (remaining.length) {
+    try {
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(remaining));
+      return remaining;
+    } catch {
+      remaining.pop();
+    }
+  }
+
+  try {
+    localStorage.removeItem(HISTORY_STORAGE_KEY);
+  } catch {}
+  return [];
+}
+
+function createHistoryId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function saveCurrentPrintHistory() {
+  const historyItems = items.filter(isActiveItem).map((item) => normalizeItem(item));
+  if (!historyItems.length) return;
+
+  const itemSignature = JSON.stringify(historyItems);
+  const history = loadPrintHistory().filter((entry) => JSON.stringify(entry.items) !== itemSignature);
+  history.unshift({
+    id: createHistoryId(),
+    printedAt: new Date().toISOString(),
+    items: historyItems
+  });
+  savePrintHistory(history);
+}
+
+function formatHistoryDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "日時不明";
+  return date.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function renderPrintHistory() {
+  const history = loadPrintHistory();
+  historyList.innerHTML = "";
+  historyHelp.textContent = history.length
+    ? `印刷した問題を新しい順に保存しています（${history.length}／${MAX_HISTORY_ITEMS}件）。`
+    : `印刷した問題を新しい順に最大${MAX_HISTORY_ITEMS}件保存します。`;
+
+  if (!history.some((entry) => entry.id === selectedHistoryId)) {
+    selectedHistoryId = null;
+  }
+  restoreHistoryButton.disabled = !selectedHistoryId;
+
+  if (!history.length) {
+    const empty = document.createElement("p");
+    empty.className = "history-empty";
+    empty.textContent = "印刷履歴はまだありません。";
+    historyList.append(empty);
+    return;
+  }
+
+  history.forEach((entry) => {
+    const formattedDate = formatHistoryDate(entry.printedAt);
+    const row = document.createElement("article");
+    row.className = "history-item";
+    row.dataset.historyId = entry.id;
+
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.className = "history-choice";
+    choice.setAttribute("aria-pressed", String(entry.id === selectedHistoryId));
+
+    const date = document.createElement("span");
+    date.className = "history-date";
+    date.textContent = formattedDate;
+
+    const count = document.createElement("span");
+    count.className = "history-count";
+    count.textContent = `${entry.items.length}問`;
+
+    const preview = document.createElement("span");
+    preview.className = "history-preview";
+    const previewTexts = entry.items.slice(0, 2).map((item) => item.text.trim()).filter(Boolean);
+    preview.textContent = `${previewTexts.join(" ／ ")}${entry.items.length > 2 ? " ほか" : ""}`;
+
+    choice.append(date, count, preview);
+    choice.addEventListener("click", () => selectPrintHistory(entry.id));
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "history-delete";
+    deleteButton.textContent = "削除";
+    deleteButton.setAttribute("aria-label", `${formattedDate}の履歴を削除`);
+    deleteButton.addEventListener("click", () => deletePrintHistory(entry.id));
+
+    row.append(choice, deleteButton);
+    historyList.append(row);
+  });
+  updateHistorySelection();
+}
+
+function updateHistorySelection() {
+  historyList.querySelectorAll(".history-item").forEach((row) => {
+    const selected = row.dataset.historyId === selectedHistoryId;
+    row.classList.toggle("is-selected", selected);
+    row.querySelector(".history-choice")?.setAttribute("aria-pressed", String(selected));
+  });
+  restoreHistoryButton.disabled = !selectedHistoryId;
+}
+
+function selectPrintHistory(id) {
+  selectedHistoryId = id;
+  historyMessage.textContent = "";
+  updateHistorySelection();
+}
+
+function deletePrintHistory(id) {
+  const history = loadPrintHistory();
+  const target = history.find((entry) => entry.id === id);
+  savePrintHistory(history.filter((entry) => entry.id !== id));
+  if (selectedHistoryId === id) selectedHistoryId = null;
+  historyMessage.textContent = target
+    ? `${formatHistoryDate(target.printedAt)}の履歴を削除しました。`
+    : "";
+  renderPrintHistory();
+}
+
+function restoreSelectedPrintHistory() {
+  const entry = loadPrintHistory().find((historyEntry) => historyEntry.id === selectedHistoryId);
+  if (!entry) {
+    historyMessage.textContent = "復元する履歴を選択してください。";
+    selectedHistoryId = null;
+    updateHistorySelection();
+    return;
+  }
+
+  items = entry.items.map((item) => normalizeItem(item));
+  if (!items.length) items = [createEmptyItem()];
+  renderEntryInputs();
+  updateAll();
+  closeHistoryDialog();
+}
+
+function openHistoryDialog() {
+  selectedHistoryId = null;
+  historyMessage.textContent = "";
+  renderPrintHistory();
+  showModal(historyModal);
+  const firstChoice = historyList.querySelector(".history-choice");
+  (firstChoice || closeHistoryButton).focus();
+}
+
+function closeHistoryDialog() {
+  selectedHistoryId = null;
+  historyMessage.textContent = "";
+  hideModal(historyModal);
+}
+
 function getActiveItems() {
   return items.filter((item) => isActiveItem(item) && !getItemError(item));
 }
@@ -96,6 +346,36 @@ function getItemError(item) {
   return text.includes(kanji) ? "" : "問題の漢字が問題文に含まれていません";
 }
 
+function getSentenceReadingWarning(item) {
+  const sentenceReading = String(item.sentenceReading || "").trim();
+  if (!sentenceReading) return "";
+
+  const text = item.text.trim();
+  const kanji = item.kanji.trim();
+  const reading = item.reading.trim();
+  if (!text || !kanji || !reading) {
+    return "全文の読みを使うには、問題文・問題の漢字・よみがなを入力してください";
+  }
+
+  return getManualReadingParts(item, text, kanji, reading)
+    ? ""
+    : "全文の読みが問題文と対応していません。内容を確認してください";
+}
+
+function shouldOfferSentenceReading(item) {
+  if (String(item.sentenceReading || "").trim()) return true;
+  if (Array.isArray(item.sourceReadingSegments) && item.sourceReadingSegments.length) return false;
+
+  const text = item.text.trim();
+  const kanji = item.kanji.trim();
+  if (!text) return false;
+  const targetIndex = kanji ? text.indexOf(kanji) : -1;
+  const context = targetIndex >= 0
+    ? text.slice(0, targetIndex) + text.slice(targetIndex + kanji.length)
+    : text;
+  return containsKanji(context);
+}
+
 function splitPages(sourceItems) {
   const pages = [];
   for (let index = 0; index < sourceItems.length; index += ITEMS_PER_PAGE) {
@@ -106,6 +386,7 @@ function splitPages(sourceItems) {
 
 function updateControls() {
   addButton.disabled = items.length >= MAX_ITEMS;
+  openKanjiSelectButton.disabled = items.length >= MAX_ITEMS && items.every(isActiveItem);
 }
 
 function updateAnswerToggleButton() {
@@ -120,15 +401,34 @@ function renderEntryInputs() {
   items.forEach((item, index) => {
     const row = document.createElement("div");
     row.className = "entry-row";
+    row.dataset.index = index;
+
+    const orderControl = document.createElement("div");
+    orderControl.className = "row-order-control";
+
+    const dragHandle = document.createElement("button");
+    dragHandle.type = "button";
+    dragHandle.className = "drag-handle";
+    dragHandle.setAttribute("aria-label", `${index + 1}番の問題を並べ替え`);
+    dragHandle.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
+    dragHandle.title = "ドラッグ、または Alt＋↑／↓ で並べ替え";
+    dragHandle.disabled = items.length <= 1;
+    dragHandle.addEventListener("pointerdown", (event) => beginPointerReorder(event, index, row, dragHandle));
+    dragHandle.addEventListener("pointermove", updatePointerReorder);
+    dragHandle.addEventListener("pointerup", finishPointerReorder);
+    dragHandle.addEventListener("pointercancel", cancelPointerReorder);
+    dragHandle.addEventListener("keydown", (event) => handleReorderKeydown(event, index));
 
     const number = document.createElement("span");
     number.className = "row-number";
     number.textContent = index + 1;
+    orderControl.append(dragHandle, number);
 
     const textInput = createInput(item.text, "問題文", 18, (value) => {
       item.text = value;
       clearSourceData(item);
     }, () => updateRowValidation(row, item));
+    textInput.classList.add("entry-text-input");
     const kanjiInput = createInput(item.kanji, "問題の漢字", 4, (value) => {
       item.kanji = value;
       clearSourceData(item);
@@ -155,7 +455,40 @@ function renderEntryInputs() {
     error.className = "entry-error";
     error.setAttribute("role", "alert");
 
-    row.append(number, textInput, kanjiInput, readingInput, deleteButton, error);
+    const sentenceReadingDetails = document.createElement("details");
+    sentenceReadingDetails.className = "sentence-reading-details";
+    sentenceReadingDetails.open = Boolean(item.sentenceReading && getSentenceReadingWarning(item));
+
+    const sentenceReadingSummary = document.createElement("summary");
+    sentenceReadingSummary.textContent = item.sentenceReading
+      ? "全文の読みを編集"
+      : "全文の読みを設定（任意）";
+
+    const sentenceReadingInput = createInput(item.sentenceReading, "全文の読み", 40, (value) => {
+      item.sentenceReading = value;
+      sentenceReadingSummary.textContent = value ? "全文の読みを編集" : "全文の読みを設定（任意）";
+    }, () => updateRowValidation(row, item));
+    sentenceReadingInput.classList.add("sentence-reading-input");
+
+    const sentenceReadingHint = document.createElement("span");
+    sentenceReadingHint.className = "sentence-reading-hint";
+    sentenceReadingHint.textContent = "例: ぎんこうにちょきんする";
+    sentenceReadingDetails.append(sentenceReadingSummary, sentenceReadingInput, sentenceReadingHint);
+
+    const warning = document.createElement("p");
+    warning.className = "entry-warning";
+    warning.setAttribute("role", "status");
+
+    row.append(
+      orderControl,
+      textInput,
+      kanjiInput,
+      readingInput,
+      deleteButton,
+      error,
+      sentenceReadingDetails,
+      warning
+    );
     updateRowValidation(row, item);
     entryList.append(row);
   });
@@ -163,12 +496,148 @@ function renderEntryInputs() {
   updateControls();
 }
 
+function moveItem(sourceIndex, targetIndex, focusHandle = true) {
+  if (
+    sourceIndex === targetIndex
+    || sourceIndex < 0
+    || sourceIndex >= items.length
+    || targetIndex < 0
+    || targetIndex >= items.length
+  ) {
+    return;
+  }
+
+  const [movedItem] = items.splice(sourceIndex, 1);
+  items.splice(targetIndex, 0, movedItem);
+  renderEntryInputs();
+  updateAll();
+  reorderStatus.textContent = `${sourceIndex + 1}番の問題を${targetIndex + 1}番へ移動しました。`;
+
+  if (focusHandle) {
+    requestAnimationFrame(() => {
+      entryList.querySelector(`.entry-row[data-index="${targetIndex}"] .drag-handle`)?.focus();
+    });
+  }
+}
+
+function handleReorderKeydown(event, index) {
+  if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+  event.preventDefault();
+  const targetIndex = event.key === "ArrowUp"
+    ? Math.max(0, index - 1)
+    : Math.min(items.length - 1, index + 1);
+  moveItem(index, targetIndex);
+}
+
+function beginPointerReorder(event, index, row, handle) {
+  if (event.button !== 0 || items.length <= 1) return;
+  event.preventDefault();
+  handle.focus();
+  handle.setPointerCapture?.(event.pointerId);
+  pointerReorder = {
+    pointerId: event.pointerId,
+    sourceIndex: index,
+    insertionIndex: index,
+    startY: event.clientY,
+    row,
+    handle,
+    started: false
+  };
+}
+
+function updatePointerReorder(event) {
+  if (!pointerReorder || event.pointerId !== pointerReorder.pointerId) return;
+  if (!pointerReorder.started && Math.abs(event.clientY - pointerReorder.startY) < 5) return;
+
+  if (!pointerReorder.started) {
+    pointerReorder.started = true;
+    pointerReorder.row.classList.add("is-dragging");
+    entryList.classList.add("is-reordering");
+    reorderStatus.textContent = `${pointerReorder.sourceIndex + 1}番の問題を移動中です。`;
+  }
+
+  event.preventDefault();
+  const rows = Array.from(entryList.querySelectorAll(".entry-row"));
+  let insertionIndex = rows.length;
+  for (let index = 0; index < rows.length; index += 1) {
+    const rect = rows[index].getBoundingClientRect();
+    if (event.clientY < rect.top + rect.height / 2) {
+      insertionIndex = index;
+      break;
+    }
+  }
+
+  pointerReorder.insertionIndex = insertionIndex;
+  rows.forEach((row) => row.classList.remove("drop-before", "drop-after"));
+  if (insertionIndex < rows.length) {
+    rows[insertionIndex].classList.add("drop-before");
+  } else {
+    rows[rows.length - 1]?.classList.add("drop-after");
+  }
+  autoScrollEntryList(event.clientY);
+}
+
+function finishPointerReorder(event) {
+  if (!pointerReorder || event.pointerId !== pointerReorder.pointerId) return;
+  const state = pointerReorder;
+  const targetIndex = state.insertionIndex > state.sourceIndex
+    ? state.insertionIndex - 1
+    : state.insertionIndex;
+  clearPointerReorder();
+
+  if (state.started && targetIndex !== state.sourceIndex) {
+    moveItem(state.sourceIndex, Math.max(0, Math.min(items.length - 1, targetIndex)));
+  } else {
+    state.handle.focus();
+  }
+}
+
+function cancelPointerReorder(event) {
+  if (!pointerReorder || event.pointerId !== pointerReorder.pointerId) return;
+  const wasStarted = pointerReorder.started;
+  clearPointerReorder();
+  if (wasStarted) reorderStatus.textContent = "問題の並べ替えをキャンセルしました。";
+}
+
+function clearPointerReorder() {
+  if (!pointerReorder) return;
+  pointerReorder.row.classList.remove("is-dragging");
+  entryList.classList.remove("is-reordering");
+  entryList.querySelectorAll(".drop-before, .drop-after").forEach((row) => {
+    row.classList.remove("drop-before", "drop-after");
+  });
+  pointerReorder = null;
+}
+
+function autoScrollEntryList(clientY) {
+  const controls = entryList.closest(".controls");
+  if (controls && controls.scrollHeight > controls.clientHeight + 1) {
+    const rect = controls.getBoundingClientRect();
+    if (clientY < rect.top + 48) controls.scrollTop -= 14;
+    if (clientY > rect.bottom - 48) controls.scrollTop += 14;
+    return;
+  }
+
+  if (clientY < 48) window.scrollBy(0, -14);
+  if (clientY > window.innerHeight - 48) window.scrollBy(0, 14);
+}
+
 function updateRowValidation(row, item) {
   const error = getItemError(item);
+  const warning = getSentenceReadingWarning(item);
   row.classList.toggle("has-error", Boolean(error));
+  row.classList.toggle("has-warning", Boolean(warning));
   const message = row.querySelector(".entry-error");
   if (message) {
     message.textContent = error;
+  }
+  const warningMessage = row.querySelector(".entry-warning");
+  if (warningMessage) {
+    warningMessage.textContent = warning;
+  }
+  const details = row.querySelector(".sentence-reading-details");
+  if (details) {
+    details.hidden = !shouldOfferSentenceReading(item);
   }
 }
 
@@ -260,6 +729,23 @@ function buildSentence(item) {
   }
 
   const target = kanji || Array.from(text)[0] || "";
+  const manualReadingParts = getManualReadingParts(item, text, target, reading);
+  if (manualReadingParts) {
+    manualReadingParts.forEach((part) => {
+      if (part.isTarget) {
+        parts.push(answerBoxes(target, reading));
+      } else {
+        appendTextPart(parts, part.text, part.reading);
+      }
+    });
+    return parts;
+  }
+
+  const datasetParts = buildDatasetSentence(item, text, target, reading);
+  if (datasetParts) {
+    return datasetParts;
+  }
+
   const sourceParts = buildSourceWordSentence(item, text, target, reading);
   if (sourceParts) {
     return sourceParts;
@@ -279,6 +765,108 @@ function buildSentence(item) {
   }
 
   return parts;
+}
+
+function getManualReadingParts(item, text, target, targetReading) {
+  const sentenceReading = String(item.sentenceReading || "").trim();
+  if (!sentenceReading || !text || !target || !targetReading) return null;
+
+  const alignedParts = alignKanjiReadings(text, sentenceReading);
+  const targetStringIndex = text.indexOf(target);
+  if (!alignedParts || targetStringIndex < 0) return null;
+
+  const targetStart = Array.from(text.slice(0, targetStringIndex)).length;
+  const targetLength = Array.from(target).length;
+  const targetEnd = targetStart + targetLength;
+  const result = [];
+  let cursor = 0;
+  let renderedTarget = false;
+
+  for (const part of alignedParts) {
+    const partLength = Array.from(part.text).length;
+    const partEnd = cursor + partLength;
+    if (targetEnd <= cursor || targetStart >= partEnd) {
+      result.push(part);
+    } else {
+      if (targetStart < cursor || targetEnd > partEnd || renderedTarget || !part.reading) return null;
+
+      const localTargetStart = targetStart - cursor;
+      const beforeTarget = sliceCodePoints(part.text, 0, localTargetStart);
+      const afterTarget = sliceCodePoints(part.text, localTargetStart + targetLength, partLength);
+      const splitReading = splitSourceWordReading(part.text, part.reading, target, targetReading);
+      if (!splitReading) return null;
+
+      if (beforeTarget) result.push({ text: beforeTarget, reading: splitReading.before });
+      result.push({ isTarget: true });
+      if (afterTarget) result.push({ text: afterTarget, reading: splitReading.after });
+      renderedTarget = true;
+    }
+    cursor = partEnd;
+  }
+
+  return renderedTarget ? result : null;
+}
+
+function buildDatasetSentence(item, text, target, reading) {
+  const segments = item.sourceReadingSegments;
+  const targetSpan = item.sourceTargetSpan;
+  if (!Array.isArray(segments) || !targetSpan) return null;
+
+  const characters = Array.from(text);
+  const targetStart = targetSpan.start;
+  const targetEnd = targetStart + targetSpan.length;
+  if (
+    !Number.isInteger(targetStart)
+    || !Number.isInteger(targetSpan.length)
+    || targetSpan.length < 1
+    || sliceCodePoints(text, targetStart, targetEnd) !== target
+  ) {
+    return null;
+  }
+
+  const parts = [];
+  let cursor = 0;
+  let renderedTarget = false;
+
+  for (const segment of segments) {
+    const segmentStart = segment.start;
+    const segmentEnd = segmentStart + segment.length;
+    const segmentReading = String(segment.reading || "").trim();
+    if (
+      segmentStart !== cursor
+      || segment.length < 1
+      || segmentEnd > characters.length
+      || !segmentReading
+    ) {
+      return null;
+    }
+
+    const surface = characters.slice(segmentStart, segmentEnd).join("");
+    if (targetEnd <= segmentStart || targetStart >= segmentEnd) {
+      appendTextPart(parts, surface, segmentReading);
+    } else {
+      if (targetStart < segmentStart || targetEnd > segmentEnd || renderedTarget) return null;
+
+      const localTargetStart = targetStart - segmentStart;
+      const beforeTarget = Array.from(surface).slice(0, localTargetStart).join("");
+      const afterTarget = Array.from(surface).slice(localTargetStart + targetSpan.length).join("");
+      const splitReading = splitSourceWordReading(surface, segmentReading, target, reading);
+      if (!splitReading) return null;
+
+      appendTextPart(parts, beforeTarget, splitReading.before);
+      parts.push(answerBoxes(target, reading));
+      appendTextPart(parts, afterTarget, splitReading.after);
+      renderedTarget = true;
+    }
+
+    cursor = segmentEnd;
+  }
+
+  return cursor === characters.length && renderedTarget ? parts : null;
+}
+
+function sliceCodePoints(value, start, end) {
+  return Array.from(value).slice(start, end).join("");
 }
 
 function buildSourceWordSentence(item, text, target, reading) {
@@ -328,9 +916,13 @@ function splitSourceWordReading(word, wordReading, target, targetReading) {
   }
 
   const readingIndexes = findAllIndexes(wordReading, targetReading);
-  if (readingIndexes.length !== 1) return null;
+  if (!readingIndexes.length) return null;
 
-  const [readingIndex] = readingIndexes;
+  let readingIndex = readingIndexes[0];
+  if (readingIndexes.length > 1) {
+    const precedingKanjiCount = Array.from(word.slice(0, targetIndex)).filter(containsKanji).length;
+    readingIndex = readingIndexes[Math.min(precedingKanjiCount, readingIndexes.length - 1)];
+  }
   return {
     before: wordReading.slice(0, readingIndex),
     after: wordReading.slice(readingIndex + targetReading.length)
@@ -349,11 +941,98 @@ function findAllIndexes(value, search) {
 
 function appendTextPart(parts, value, reading = "") {
   if (!value) return;
-  parts.push(reading && containsKanji(value) ? rubyTextSpan(value, reading) : textSpan(value));
+  if (!reading || !containsKanji(value)) {
+    parts.push(textSpan(value));
+    return;
+  }
+
+  const alignedParts = alignKanjiReadings(value, reading);
+  if (!alignedParts) {
+    parts.push(textSpan(value));
+    return;
+  }
+
+  alignedParts.forEach((part) => {
+    parts.push(part.reading ? rubyTextSpan(part.text, part.reading) : textSpan(part.text));
+  });
 }
 
 function containsKanji(value) {
   return /\p{Script=Han}/u.test(value);
+}
+
+function alignKanjiReadings(surface, reading) {
+  const tokens = [];
+  Array.from(surface).forEach((character) => {
+    const isKanji = containsKanji(character);
+    const previous = tokens[tokens.length - 1];
+    if (previous && previous.isKanji === isKanji) {
+      previous.text += character;
+    } else {
+      tokens.push({ text: character, isKanji });
+    }
+  });
+
+  const normalizedReading = katakanaToHiragana(reading);
+  const memo = new Map();
+
+  function align(tokenIndex, readingIndex) {
+    const key = `${tokenIndex}:${readingIndex}`;
+    if (memo.has(key)) return memo.get(key);
+
+    if (tokenIndex === tokens.length) {
+      return readingIndex === normalizedReading.length ? [] : null;
+    }
+
+    const token = tokens[tokenIndex];
+    if (!token.isKanji) {
+      const expected = katakanaToHiragana(token.text);
+      const candidateIndexes = [readingIndex];
+      if (tokenIndex === 0 && !normalizedReading.startsWith(expected, readingIndex)) {
+        let candidate = normalizedReading.indexOf(expected, readingIndex + 1);
+        while (candidate >= 0) {
+          candidateIndexes.push(candidate);
+          candidate = normalizedReading.indexOf(expected, candidate + 1);
+        }
+      }
+
+      for (const candidateIndex of candidateIndexes) {
+        if (!normalizedReading.startsWith(expected, candidateIndex)) continue;
+        const rest = align(tokenIndex + 1, candidateIndex + expected.length);
+        if (rest) {
+          const result = [{ text: token.text, reading: "" }, ...rest];
+          memo.set(key, result);
+          return result;
+        }
+      }
+
+      memo.set(key, null);
+      return null;
+    }
+
+    for (let end = readingIndex + 1; end <= normalizedReading.length; end += 1) {
+      const rest = align(tokenIndex + 1, end);
+      if (rest) {
+        const result = [{ text: token.text, reading: reading.slice(readingIndex, end) }, ...rest];
+        memo.set(key, result);
+        return result;
+      }
+    }
+
+    memo.set(key, null);
+    return null;
+  }
+
+  return align(0, 0);
+}
+
+function katakanaToHiragana(value) {
+  return Array.from(value).map((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint >= 0x30A1 && codePoint <= 0x30F6
+      ? String.fromCodePoint(codePoint - 0x60)
+      : character;
+  }).join("");
 }
 
 function textSpan(value) {
@@ -468,6 +1147,55 @@ function renderPreview() {
   });
 }
 
+function getPreviewBaseScale() {
+  const value = Number(getComputedStyle(previewStage).getPropertyValue("--preview-base-scale"));
+  return Number.isFinite(value) && value > 0 ? value : 0.63;
+}
+
+function getPreviewMaxScale(baseScale) {
+  const paperWidthPx = 210 * 96 / 25.4;
+  const availableWidth = Math.max(0, previewStage.clientWidth - 4);
+  return Math.max(baseScale, Math.min(1, availableWidth / paperWidthPx));
+}
+
+function updatePreviewZoom() {
+  const baseScale = getPreviewBaseScale();
+  const maxScale = getPreviewMaxScale(baseScale);
+  const maxSteps = Math.ceil(Math.max(0, maxScale - baseScale) / PREVIEW_ZOOM_STEP);
+  previewZoomSteps = Math.min(previewZoomSteps, maxSteps);
+  const desiredScale = baseScale + previewZoomSteps * PREVIEW_ZOOM_STEP;
+  const scale = Math.min(maxScale, desiredScale);
+
+  if (previewZoomSteps <= 0) {
+    previewZoomSteps = 0;
+    previewStage.style.removeProperty("--preview-scale");
+    previewStage.style.removeProperty("--preview-w");
+    previewStage.style.removeProperty("--preview-h");
+  } else {
+    previewStage.style.setProperty("--preview-scale", scale.toFixed(4));
+    previewStage.style.setProperty("--preview-w", `${(210 * scale).toFixed(3)}mm`);
+    previewStage.style.setProperty("--preview-h", `${(297 * scale).toFixed(3)}mm`);
+  }
+
+  zoomOutButton.disabled = previewZoomSteps === 0;
+  zoomInButton.disabled = scale >= maxScale - 0.001;
+}
+
+function zoomPreviewIn() {
+  previewZoomSteps += 1;
+  updatePreviewZoom();
+}
+
+function zoomPreviewOut() {
+  previewZoomSteps -= 1;
+  updatePreviewZoom();
+}
+
+function schedulePreviewZoomUpdate() {
+  cancelAnimationFrame(previewResizeFrame);
+  previewResizeFrame = requestAnimationFrame(updatePreviewZoom);
+}
+
 function updateAll() {
   updateControls();
   renderPreview();
@@ -479,8 +1207,8 @@ function addItem() {
   items.push(createEmptyItem());
   renderEntryInputs();
   updateAll();
-  const inputs = entryList.querySelectorAll("input");
-  inputs[inputs.length - 3]?.focus();
+  const textInputs = entryList.querySelectorAll(".entry-text-input");
+  textInputs[textInputs.length - 1]?.focus();
 }
 
 function resetAll() {
@@ -497,9 +1225,9 @@ function escapeCsvValue(value) {
 }
 
 function itemsToCsv(sourceItems) {
-  const rows = [["問題文", "問題の漢字", "よみがな"]];
+  const rows = [["問題文", "問題の漢字", "よみがな", "全文の読み"]];
   sourceItems.filter(isActiveItem).forEach((item) => {
-    rows.push([item.text, item.kanji, item.reading]);
+    rows.push([item.text, item.kanji, item.reading, item.sentenceReading || ""]);
   });
   return rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
 }
@@ -570,26 +1298,23 @@ function csvRowsToItems(rows) {
     .map((row) => normalizeItem({
       text: String(row[0] || "").trim(),
       kanji: String(row[1] || "").trim(),
-      reading: String(row[2] || "").trim()
+      reading: String(row[2] || "").trim(),
+      sentenceReading: String(row[3] || "").trim()
     }))
     .filter(isActiveItem);
 }
 
 function openCsvDialog() {
-  lastFocusedElement = document.activeElement;
   csvMessage.textContent = "";
   csvTextArea.value = itemsToCsv(items);
-  csvModal.hidden = false;
+  showModal(csvModal);
   csvTextArea.focus();
   csvTextArea.select();
 }
 
 function closeCsvDialog() {
-  csvModal.hidden = true;
   csvMessage.textContent = "";
-  if (lastFocusedElement instanceof HTMLElement) {
-    lastFocusedElement.focus();
-  }
+  hideModal(csvModal);
 }
 
 function importCsvItems() {
@@ -631,25 +1356,116 @@ function downloadCsvFile() {
   csvMessage.textContent = "CSVファイルをダウンロードしました。";
 }
 
+function openKanjiSelectDialog() {
+  showModal(kanjiSelectModal);
+  renderKanjiChoices();
+  kanjiSelectInput.focus();
+  kanjiSelectInput.select();
+}
+
+function closeKanjiSelectDialog() {
+  kanjiSelectMessage.textContent = "";
+  hideModal(kanjiSelectModal);
+}
+
+function renderKanjiChoices() {
+  const query = kanjiSelectInput.value.trim().normalize("NFC");
+  kanjiChoiceList.innerHTML = "";
+
+  if (!query) {
+    kanjiSelectMessage.textContent = "漢字を1字入力してください。";
+    return;
+  }
+
+  if (Array.from(query).length !== 1 || !containsKanji(query)) {
+    kanjiSelectMessage.textContent = "検索する漢字を1字に絞ってください。";
+    return;
+  }
+
+  const choices = getKanjiData().filter((entry) => entry.targetKanji === query);
+  if (!choices.length) {
+    kanjiSelectMessage.textContent = `「${query}」の例文はありません。`;
+    return;
+  }
+
+  kanjiSelectMessage.textContent = `「${query}」の例文が${choices.length}件あります。`;
+  choices.forEach((entry) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "kanji-choice-button";
+
+    const sentence = document.createElement("span");
+    sentence.className = "kanji-choice-sentence";
+    appendHighlightedTarget(sentence, entry);
+
+    const meta = document.createElement("span");
+    meta.className = "kanji-choice-meta";
+    meta.textContent = `${entry.grade}年・${entry.word}（${entry.wordReading}）`;
+
+    const action = document.createElement("span");
+    action.className = "kanji-choice-action";
+    action.textContent = "追加する";
+
+    button.append(sentence, meta, action);
+    button.addEventListener("click", () => addKanjiChoice(entry));
+    kanjiChoiceList.append(button);
+  });
+}
+
+function appendHighlightedTarget(container, entry) {
+  const sentence = String(entry.sentence || "");
+  const characters = Array.from(sentence);
+  const start = Number(entry.targetSpan?.start);
+  const length = Number(entry.targetSpan?.length);
+  if (!Number.isInteger(start) || !Number.isInteger(length) || length < 1) {
+    container.textContent = sentence;
+    return;
+  }
+
+  const before = characters.slice(0, start).join("");
+  const target = characters.slice(start, start + length).join("");
+  const after = characters.slice(start + length).join("");
+  container.append(document.createTextNode(before));
+  const mark = document.createElement("mark");
+  mark.textContent = target;
+  container.append(mark, document.createTextNode(after));
+}
+
+function addKanjiChoice(entry) {
+  const item = createItemFromKanjiEntry(entry);
+  const emptyIndex = items.findIndex((current) => !isActiveItem(current));
+  if (emptyIndex >= 0) {
+    items[emptyIndex] = item;
+  } else if (items.length < MAX_ITEMS) {
+    items.push(item);
+  } else {
+    kanjiSelectMessage.textContent = `問題は最大${MAX_ITEMS}問までです。`;
+    return;
+  }
+
+  renderEntryInputs();
+  updateAll();
+  closeKanjiSelectDialog();
+}
+
 function openRandomDialog() {
-  lastFocusedElement = document.activeElement;
   randomMessage.textContent = "";
-  randomModal.hidden = false;
-  randomCountInput.focus();
-  randomCountInput.select();
+  showModal(randomModal);
+  randomModal.querySelector("input[name='randomGrade']:checked")?.focus();
 }
 
 function closeRandomDialog() {
-  randomModal.hidden = true;
   randomMessage.textContent = "";
-  if (lastFocusedElement instanceof HTMLElement) {
-    lastFocusedElement.focus();
-  }
+  hideModal(randomModal);
 }
 
 function getSelectedRandomGrade() {
   const selected = randomModal.querySelector("input[name='randomGrade']:checked");
   return Number(selected?.value || 1);
+}
+
+function getSelectedRandomMode() {
+  return randomModal.querySelector("input[name='randomMode']:checked")?.value || "replace";
 }
 
 function normalizeRandomCount() {
@@ -659,21 +1475,32 @@ function normalizeRandomCount() {
 }
 
 function getKanjiData() {
-  return Array.isArray(window.KANJI_DATA) ? window.KANJI_DATA : [];
+  const dataset = window.KANJI_WRITING_QUESTION_DATASET;
+  if (!dataset || !Array.isArray(dataset.grades)) return [];
+
+  return dataset.grades.flatMap((group) => {
+    if (!Array.isArray(group.questions)) return [];
+    return group.questions
+      .filter((question) => question.isActive)
+      .map((question) => ({ ...question, grade: Number(group.grade) }));
+  });
 }
 
 function createItemFromKanjiEntry(entry) {
-  const kanji = String(entry.answer || entry.target_kanji || "");
-  const exampleSentence = String(entry.example_sentence || "");
+  const kanji = String(entry.targetKanji || "");
+  const exampleSentence = String(entry.sentence || "");
   const word = String(entry.word || "");
   const text = exampleSentence.includes(word) ? exampleSentence : word;
   return normalizeItem({
     text,
     kanji,
-    reading: String(entry.question_reading || entry.target_reading || entry.reading || ""),
+    reading: String(entry.targetReading || ""),
     sourceWord: word,
-    sourceWordReading: String(entry.reading || ""),
-    sourceTargetReading: String(entry.target_reading || entry.question_reading || "")
+    sourceWordReading: String(entry.wordReading || ""),
+    sourceTargetReading: String(entry.targetReading || ""),
+    sourceTargetSpan: entry.targetSpan,
+    sourceWordSpan: entry.wordSpan,
+    sourceReadingSegments: entry.readingSegments
   });
 }
 
@@ -695,11 +1522,12 @@ function generateRandomItems() {
 
   const grade = getSelectedRandomGrade();
   const count = normalizeRandomCount();
+  const mode = getSelectedRandomMode();
   randomCountInput.value = count;
 
   const candidates = data
     .filter((entry) => Number(entry.grade) === grade)
-    .filter((entry) => entry.word && entry.reading && (entry.answer || entry.target_kanji))
+    .filter((entry) => entry.word && entry.wordReading && entry.targetKanji)
     .map(createItemFromKanjiEntry)
     .filter((item) => item.text.includes(item.kanji));
 
@@ -708,7 +1536,29 @@ function generateRandomItems() {
     return;
   }
 
-  items = shuffle(candidates).slice(0, Math.min(count, candidates.length));
+  const availableCount = mode === "append"
+    ? MAX_ITEMS - items.filter(isActiveItem).length
+    : MAX_ITEMS;
+  if (availableCount <= 0) {
+    randomMessage.textContent = `問題は最大${MAX_ITEMS}問までです。`;
+    return;
+  }
+
+  const generatedItems = shuffle(candidates)
+    .slice(0, Math.min(count, candidates.length, availableCount));
+
+  if (mode === "append") {
+    generatedItems.forEach((item) => {
+      const emptyIndex = items.findIndex((current) => !isActiveItem(current));
+      if (emptyIndex >= 0) {
+        items[emptyIndex] = item;
+      } else {
+        items.push(item);
+      }
+    });
+  } else {
+    items = generatedItems;
+  }
   renderEntryInputs();
   updateAll();
   closeRandomDialog();
@@ -721,6 +1571,7 @@ function cleanupPrintMode() {
 }
 
 async function printSheets() {
+  saveCurrentPrintHistory();
   document.body.classList.add("is-printing");
   if (document.fonts) {
     await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 1200))]);
@@ -732,8 +1583,18 @@ async function printSheets() {
 }
 
 addButton.addEventListener("click", addItem);
+openKanjiSelectButton.addEventListener("click", openKanjiSelectDialog);
 openRandomButton.addEventListener("click", openRandomDialog);
 openDataButton.addEventListener("click", openCsvDialog);
+openHistoryButton.addEventListener("click", openHistoryDialog);
+closeHistoryButton.addEventListener("click", closeHistoryDialog);
+cancelHistoryButton.addEventListener("click", closeHistoryDialog);
+restoreHistoryButton.addEventListener("click", restoreSelectedPrintHistory);
+zoomInButton.addEventListener("click", zoomPreviewIn);
+zoomOutButton.addEventListener("click", zoomPreviewOut);
+closeKanjiSelectButton.addEventListener("click", closeKanjiSelectDialog);
+cancelKanjiSelectButton.addEventListener("click", closeKanjiSelectDialog);
+kanjiSelectInput.addEventListener("input", renderKanjiChoices);
 closeRandomButton.addEventListener("click", closeRandomDialog);
 cancelRandomButton.addEventListener("click", closeRandomDialog);
 generateRandomButton.addEventListener("click", generateRandomItems);
@@ -746,30 +1607,32 @@ answerToggleButton.addEventListener("click", () => {
   updateAnswerToggleButton();
   renderPreview();
 });
-randomModal.addEventListener("click", (event) => {
-  if (event.target === randomModal) {
-    closeRandomDialog();
-  }
+const modalDialogs = [
+  [historyModal, closeHistoryDialog],
+  [kanjiSelectModal, closeKanjiSelectDialog],
+  [randomModal, closeRandomDialog],
+  [csvModal, closeCsvDialog]
+];
+
+modalDialogs.forEach(([modal, closeDialog]) => {
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeDialog();
+  });
 });
-csvModal.addEventListener("click", (event) => {
-  if (event.target === csvModal) {
-    closeCsvDialog();
-  }
-});
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !randomModal.hidden) {
-    closeRandomDialog();
-  } else if (event.key === "Escape" && !csvModal.hidden) {
-    closeCsvDialog();
-  }
+  if (event.key !== "Escape") return;
+  modalDialogs.find(([modal]) => !modal.hidden)?.[1]();
 });
-document.getElementById("resetButton").addEventListener("click", resetAll);
-document.getElementById("printButton").addEventListener("click", printSheets);
+resetButton.addEventListener("click", resetAll);
+printButton.addEventListener("click", printSheets);
+window.addEventListener("resize", schedulePreviewZoomUpdate);
 
 loadState();
 updateAnswerToggleButton();
 renderEntryInputs();
 renderPreview();
+updatePreviewZoom();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
