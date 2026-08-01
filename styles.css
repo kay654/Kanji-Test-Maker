@@ -9,6 +9,8 @@
   --blue: #0d6efd;
   --paper-w: 210mm;
   --paper-h: 297mm;
+  /* AirPrintのページ境界の丸め誤差を吸収する印刷専用の高さ */
+  --print-page-h: 296mm;
   --sheet-font: "Klee One", "Yu Kyokasho", "UD Digi Kyokasho N-R", "Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif;
   color-scheme: light;
   font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
@@ -1164,7 +1166,7 @@ body.is-printing .print-root {
 body.is-printing .print-page {
   display: block !important;
   width: 210mm !important;
-  height: 297mm !important;
+  height: var(--print-page-h) !important;
   overflow: hidden !important;
   break-inside: avoid;
   page-break-inside: avoid;
@@ -1178,7 +1180,7 @@ body.is-printing .print-page + .print-page {
 body.is-printing .print-area {
   position: static !important;
   width: 210mm !important;
-  height: 297mm !important;
+  height: var(--print-page-h) !important;
   border: 0 !important;
   box-shadow: none !important;
   transform: none !important;
@@ -1206,7 +1208,7 @@ body.is-printing .print-area {
   .print-page {
     display: block !important;
     width: 210mm !important;
-    height: 297mm !important;
+    height: var(--print-page-h) !important;
     overflow: hidden !important;
     break-inside: avoid;
     page-break-inside: avoid;
@@ -1220,7 +1222,7 @@ body.is-printing .print-area {
   .print-area {
     position: static !important;
     width: 210mm !important;
-    height: 297mm !important;
+    height: var(--print-page-h) !important;
     border: 0 !important;
     box-shadow: none !important;
     transform: none !important;
