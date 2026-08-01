@@ -42,7 +42,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -74,7 +75,8 @@ button:disabled {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid rgba(13, 110, 253, 0.22);
   outline-offset: 2px;
 }
@@ -182,18 +184,22 @@ input:focus-visible {
   line-height: 1;
 }
 
-.btn-toggle-answer {
-  min-width: 112px;
-  border-color: #b9d8c3;
-  color: #08723e;
-  background: #ffffff;
+.print-mode-field {
+  display: inline-flex;
+  align-items: center;
 }
 
-.btn-toggle-answer.is-active {
-  border-color: var(--green);
-  color: #ffffff;
-  background: linear-gradient(180deg, #11a845, #078832);
-  box-shadow: 0 6px 14px rgba(8, 155, 53, 0.2);
+.print-mode-field select {
+  height: 38px;
+  min-height: 38px;
+  padding: 0 30px 0 10px;
+  border: 1px solid #b9d8c3;
+  border-radius: 6px;
+  color: #075f35;
+  background: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .entry-actions {
@@ -1263,8 +1269,9 @@ body.is-printing .print-area {
     min-width: 72px;
   }
 
-  .btn-toggle-answer {
-    min-width: 104px;
+  .print-mode-field select {
+    padding-right: 24px;
+    padding-left: 8px;
   }
 
   .btn-blue {
@@ -1295,10 +1302,11 @@ body.is-printing .print-area {
     padding: 0;
   }
 
-  .preview-actions .btn-toggle-answer {
-    min-width: 104px;
-    padding-right: 8px;
-    padding-left: 8px;
+  .print-mode-field select {
+    width: 120px;
+    padding-right: 22px;
+    padding-left: 7px;
+    font-size: 13px;
   }
 
   .preview-actions .btn-history .button-label,
@@ -1403,7 +1411,7 @@ body.is-printing .print-area {
   .app-shell {
     position: static;
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     padding: 10px;
     overflow: visible;
@@ -1527,10 +1535,9 @@ body.is-printing .print-area {
     font-size: 0;
   }
 
-  .btn-toggle-answer {
-    min-width: 92px;
-    padding: 0 10px;
-    font-size: 13px;
+  .print-mode-field select {
+    width: auto;
+    max-width: 148px;
   }
 
   .preview-stage {

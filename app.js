@@ -4,6 +4,7 @@ const STORAGE_KEY = "kanji-test-maker";
 const HISTORY_STORAGE_KEY = "kanji-test-maker-print-history";
 const MAX_HISTORY_ITEMS = 100;
 const PREVIEW_ZOOM_STEP = 0.08;
+const PRINT_MODES = new Set(["questions", "answers", "both"]);
 
 const DEFAULT_ITEMS = [
   { text: "", kanji: "", reading: "", sentenceReading: "" }
@@ -29,7 +30,7 @@ const reorderStatus = document.getElementById("reorderStatus");
 const previewStage = document.getElementById("previewStage");
 const printRoot = document.getElementById("printRoot");
 const addButton = document.getElementById("addButton");
-const answerToggleButton = document.getElementById("answerToggleButton");
+const printModeSelect = document.getElementById("printModeSelect");
 const openRandomButton = document.getElementById("openRandomButton");
 const openKanjiSelectButton = document.getElementById("openKanjiSelectButton");
 const openDataButton = document.getElementById("openDataButton");
@@ -66,7 +67,7 @@ const downloadCsvButton = document.getElementById("downloadCsvButton");
 const importCsvButton = document.getElementById("importCsvButton");
 
 let lastFocusedElement = null;
-let showAnswers = false;
+let printMode = "questions";
 let pointerReorder = null;
 let selectedHistoryId = null;
 let previewZoomSteps = 0;
@@ -135,6 +136,9 @@ function loadState() {
     if (Array.isArray(saved.items) && saved.items.length) {
       items = saved.items.slice(0, MAX_ITEMS).map(normalizeItem);
     }
+    if (PRINT_MODES.has(saved.printMode)) {
+      printMode = saved.printMode;
+    }
   } catch {}
 
   if (!items.length) {
@@ -143,7 +147,7 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ items }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ items, printMode }));
 }
 
 function loadPrintHistory() {
@@ -389,10 +393,16 @@ function updateControls() {
   openKanjiSelectButton.disabled = items.length >= MAX_ITEMS && items.every(isActiveItem);
 }
 
-function updateAnswerToggleButton() {
-  answerToggleButton.setAttribute("aria-pressed", String(showAnswers));
-  answerToggleButton.classList.toggle("is-active", showAnswers);
-  answerToggleButton.textContent = showAnswers ? "答え非表示" : "答え表示";
+function getPrintModeLabel() {
+  return printMode === "answers" ? "解答" : printMode === "both" ? "問題＋解答" : "問題";
+}
+
+function updatePrintControls() {
+  printModeSelect.value = printMode;
+  const basePageCount = splitPages(getActiveItems()).length;
+  const totalPageCount = printMode === "both" ? basePageCount * 2 : basePageCount;
+  const pageLabel = `${totalPageCount}ページ`;
+  printButton.setAttribute("aria-label", `${getPrintModeLabel()}を印刷する（${pageLabel}）`);
 }
 
 function renderEntryInputs() {
@@ -428,15 +438,17 @@ function renderEntryInputs() {
       item.text = value;
       clearSourceData(item);
     }, () => updateRowValidation(row, item));
-    textInput.classList.add("entry-text-input");
+    textInput.classList.add("entry-text-input", "entry-main-input");
     const kanjiInput = createInput(item.kanji, "問題の漢字", 4, (value) => {
       item.kanji = value;
       clearSourceData(item);
     }, () => updateRowValidation(row, item));
+    kanjiInput.classList.add("entry-main-input");
     const readingInput = createInput(item.reading, "よみがな", 12, (value) => {
       item.reading = value;
       clearSourceData(item);
     }, () => updateRowValidation(row, item));
+    readingInput.classList.add("entry-main-input");
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
@@ -654,23 +666,27 @@ function createInput(value, label, maxLength, onChange, onInput) {
     updateAll();
   });
   input.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter" || !input.classList.contains("entry-main-input")) return;
     event.preventDefault();
-    const inputs = Array.from(entryList.querySelectorAll("input"));
+    const inputs = Array.from(entryList.querySelectorAll(".entry-main-input"));
     const nextInput = inputs[inputs.indexOf(input) + 1];
-    if (nextInput) nextInput.focus();
+    if (nextInput) {
+      nextInput.focus();
+    } else if (!addButton.disabled) {
+      addButton.focus();
+    }
   });
   return input;
 }
 
-function createSheet(pageItems, pageIndex) {
+function createSheet(pageItems, pageIndex, includeAnswers, pageTypeLabel) {
   const printArea = document.createElement("div");
   printArea.className = "print-area";
 
   const sheet = document.createElement("article");
   sheet.className = "sheet";
-  sheet.setAttribute("aria-label", `漢字テスト ${pageIndex + 1}ページ`);
-  sheet.append(createSheetHeader(), createQuestionGrid(pageItems, pageIndex));
+  sheet.setAttribute("aria-label", `漢字テスト ${pageTypeLabel} ${pageIndex + 1}ページ`);
+  sheet.append(createSheetHeader(), createQuestionGrid(pageItems, pageIndex, includeAnswers));
   printArea.append(sheet);
   return printArea;
 }
@@ -691,19 +707,19 @@ function createSheetHeader() {
   return header;
 }
 
-function createQuestionGrid(pageItems, pageIndex) {
+function createQuestionGrid(pageItems, pageIndex, includeAnswers) {
   const grid = document.createElement("div");
   grid.className = "question-grid";
 
   for (let i = 0; i < ITEMS_PER_PAGE; i += 1) {
     const item = pageItems[i] || { text: "", kanji: "", reading: "" };
-    grid.append(createQuestion(item, pageIndex * ITEMS_PER_PAGE + i + 1));
+    grid.append(createQuestion(item, pageIndex * ITEMS_PER_PAGE + i + 1, includeAnswers));
   }
 
   return grid;
 }
 
-function createQuestion(item, number) {
+function createQuestion(item, number, includeAnswers) {
   const question = document.createElement("section");
   question.className = "question";
 
@@ -712,19 +728,19 @@ function createQuestion(item, number) {
   numberEl.textContent = number;
 
   question.append(numberEl);
-  buildSentence(item).forEach((part) => question.append(part));
+  buildSentence(item, includeAnswers).forEach((part) => question.append(part));
 
   return question;
 }
 
-function buildSentence(item) {
+function buildSentence(item, includeAnswers) {
   const text = item.text.trim();
   const kanji = item.kanji.trim();
   const reading = item.reading.trim();
   const parts = [];
 
   if (!text && !kanji) {
-    parts.push(answerBoxes("", reading));
+    parts.push(answerBoxes("", reading, includeAnswers));
     return parts;
   }
 
@@ -733,7 +749,7 @@ function buildSentence(item) {
   if (manualReadingParts) {
     manualReadingParts.forEach((part) => {
       if (part.isTarget) {
-        parts.push(answerBoxes(target, reading));
+        parts.push(answerBoxes(target, reading, includeAnswers));
       } else {
         appendTextPart(parts, part.text, part.reading);
       }
@@ -741,12 +757,12 @@ function buildSentence(item) {
     return parts;
   }
 
-  const datasetParts = buildDatasetSentence(item, text, target, reading);
+  const datasetParts = buildDatasetSentence(item, text, target, reading, includeAnswers);
   if (datasetParts) {
     return datasetParts;
   }
 
-  const sourceParts = buildSourceWordSentence(item, text, target, reading);
+  const sourceParts = buildSourceWordSentence(item, text, target, reading, includeAnswers);
   if (sourceParts) {
     return sourceParts;
   }
@@ -757,10 +773,10 @@ function buildSentence(item) {
     const before = text.slice(0, index);
     const after = text.slice(index + target.length);
     if (before) parts.push(textSpan(before));
-    parts.push(answerBoxes(target, reading));
+    parts.push(answerBoxes(target, reading, includeAnswers));
     if (after) parts.push(textSpan(after));
   } else {
-    parts.push(answerBoxes(target, reading));
+    parts.push(answerBoxes(target, reading, includeAnswers));
     if (text) parts.push(textSpan(text));
   }
 
@@ -807,7 +823,7 @@ function getManualReadingParts(item, text, target, targetReading) {
   return renderedTarget ? result : null;
 }
 
-function buildDatasetSentence(item, text, target, reading) {
+function buildDatasetSentence(item, text, target, reading, includeAnswers) {
   const segments = item.sourceReadingSegments;
   const targetSpan = item.sourceTargetSpan;
   if (!Array.isArray(segments) || !targetSpan) return null;
@@ -854,7 +870,7 @@ function buildDatasetSentence(item, text, target, reading) {
       if (!splitReading) return null;
 
       appendTextPart(parts, beforeTarget, splitReading.before);
-      parts.push(answerBoxes(target, reading));
+      parts.push(answerBoxes(target, reading, includeAnswers));
       appendTextPart(parts, afterTarget, splitReading.after);
       renderedTarget = true;
     }
@@ -869,7 +885,7 @@ function sliceCodePoints(value, start, end) {
   return Array.from(value).slice(start, end).join("");
 }
 
-function buildSourceWordSentence(item, text, target, reading) {
+function buildSourceWordSentence(item, text, target, reading, includeAnswers) {
   const sourceWord = String(item.sourceWord || "").trim();
   const wordReading = String(item.sourceWordReading || "").trim();
   const targetReading = String(item.sourceTargetReading || reading || "").trim();
@@ -890,7 +906,7 @@ function buildSourceWordSentence(item, text, target, reading) {
 
   appendTextPart(parts, beforeText);
   appendTextPart(parts, beforeTarget, splitReading.before);
-  parts.push(answerBoxes(target, reading));
+  parts.push(answerBoxes(target, reading, includeAnswers));
   appendTextPart(parts, afterTarget, splitReading.after);
   appendTextPart(parts, afterText);
 
@@ -1059,7 +1075,7 @@ function rubyTextSpan(value, reading) {
   return wrap;
 }
 
-function answerBoxes(target, reading) {
+function answerBoxes(target, reading, includeAnswers) {
   const wrap = document.createElement("span");
   wrap.className = "answer-wrap";
   const characters = Array.from(String(target || ""));
@@ -1075,12 +1091,12 @@ function answerBoxes(target, reading) {
 
   const boxStack = document.createElement("span");
   boxStack.className = "answer-box-stack";
-  boxStack.append(createAnswerBoxSvg(characters));
+  boxStack.append(createAnswerBoxSvg(characters, includeAnswers));
   wrap.append(boxStack);
   return wrap;
 }
 
-function createAnswerBoxSvg(characters) {
+function createAnswerBoxSvg(characters, includeAnswers) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   const boxCount = Math.max(1, characters.length);
   const height = boxCount * 100;
@@ -1113,7 +1129,7 @@ function createAnswerBoxSvg(characters) {
     svg.append(line);
   }
 
-  if (showAnswers) {
+  if (includeAnswers) {
     characters.forEach((character, index) => {
       const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
       text.classList.add("answer-character");
@@ -1134,17 +1150,28 @@ function renderPreview() {
   previewStage.innerHTML = "";
   printRoot.innerHTML = "";
 
-  pages.forEach((pageItems, pageIndex) => {
-    const preview = document.createElement("div");
-    preview.className = "sheet-preview";
-    preview.append(createSheet(pageItems, pageIndex));
-    previewStage.append(preview);
+  const pageSets = printMode === "both"
+    ? [
+        { includeAnswers: false, label: "問題" },
+        { includeAnswers: true, label: "解答" }
+      ]
+    : [{ includeAnswers: printMode === "answers", label: printMode === "answers" ? "解答" : "問題" }];
 
-    const printPage = document.createElement("div");
-    printPage.className = "print-page";
-    printPage.append(createSheet(pageItems, pageIndex));
-    printRoot.append(printPage);
+  pageSets.forEach(({ includeAnswers, label }) => {
+    pages.forEach((pageItems, pageIndex) => {
+      const preview = document.createElement("div");
+      preview.className = "sheet-preview";
+      preview.append(createSheet(pageItems, pageIndex, includeAnswers, label));
+      previewStage.append(preview);
+
+      const printPage = document.createElement("div");
+      printPage.className = "print-page";
+      printPage.append(createSheet(pageItems, pageIndex, includeAnswers, label));
+      printRoot.append(printPage);
+    });
   });
+
+  updatePrintControls();
 }
 
 function getPreviewBaseScale() {
@@ -1213,8 +1240,7 @@ function addItem() {
 
 function resetAll() {
   items = [createEmptyItem()];
-  showAnswers = false;
-  updateAnswerToggleButton();
+  printMode = "questions";
   renderEntryInputs();
   updateAll();
 }
@@ -1602,10 +1628,10 @@ closeCsvButton.addEventListener("click", closeCsvDialog);
 cancelCsvButton.addEventListener("click", closeCsvDialog);
 importCsvButton.addEventListener("click", importCsvItems);
 downloadCsvButton.addEventListener("click", downloadCsvFile);
-answerToggleButton.addEventListener("click", () => {
-  showAnswers = !showAnswers;
-  updateAnswerToggleButton();
+printModeSelect.addEventListener("change", () => {
+  printMode = PRINT_MODES.has(printModeSelect.value) ? printModeSelect.value : "questions";
   renderPreview();
+  saveState();
 });
 const modalDialogs = [
   [historyModal, closeHistoryDialog],
@@ -1629,7 +1655,6 @@ printButton.addEventListener("click", printSheets);
 window.addEventListener("resize", schedulePreviewZoomUpdate);
 
 loadState();
-updateAnswerToggleButton();
 renderEntryInputs();
 renderPreview();
 updatePreviewZoom();
