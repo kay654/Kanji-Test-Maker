@@ -9,8 +9,6 @@
   --blue: #0d6efd;
   --paper-w: 210mm;
   --paper-h: 297mm;
-  /* AirPrintのページ境界の丸め誤差を吸収する印刷専用の高さ */
-  --print-page-h: 296mm;
   --sheet-font: "Klee One", "Yu Kyokasho", "UD Digi Kyokasho N-R", "Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif;
   color-scheme: light;
   font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
@@ -1161,7 +1159,8 @@ body.is-printing {
 }
 
 body.is-printing .app-header,
-body.is-printing .app-shell {
+body.is-printing .app-shell,
+body.is-printing .modal-overlay {
   display: none !important;
 }
 
@@ -1171,25 +1170,44 @@ body.is-printing .print-root {
 
 body.is-printing .print-page {
   display: block !important;
+  position: static !important;
   width: 210mm !important;
-  height: var(--print-page-h) !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
   overflow: hidden !important;
+  background: #ffffff !important;
   break-inside: avoid;
   page-break-inside: avoid;
+}
+
+body.is-printing .print-root .print-area {
+  position: static !important;
+  display: block !important;
+  width: 210mm !important;
+  height: auto !important;
+  margin: 0 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transform-origin: initial !important;
+}
+
+body.is-printing .sheet {
+  height: auto !important;
+  padding-top: 4mm;
+  padding-bottom: 4mm;
+}
+
+body.is-printing .sheet-header {
+  min-height: 5.5mm;
+  margin-bottom: 1.5mm;
 }
 
 body.is-printing .print-page + .print-page {
   break-before: page;
   page-break-before: always;
-}
-
-body.is-printing .print-area {
-  position: static !important;
-  width: 210mm !important;
-  height: var(--print-page-h) !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  transform: none !important;
 }
 
 @media print {
@@ -1203,7 +1221,8 @@ body.is-printing .print-area {
   }
 
   .app-header,
-  .app-shell {
+  .app-shell,
+  .modal-overlay {
     display: none !important;
   }
 
@@ -1213,25 +1232,44 @@ body.is-printing .print-area {
 
   .print-page {
     display: block !important;
+    position: static !important;
     width: 210mm !important;
-    height: var(--print-page-h) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
     overflow: hidden !important;
+    background: #ffffff !important;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  .print-root .print-area {
+    position: static !important;
+    display: block !important;
+    width: 210mm !important;
+    height: auto !important;
+    margin: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transform-origin: initial !important;
+  }
+
+  .sheet {
+    height: auto !important;
+    padding-top: 4mm;
+    padding-bottom: 4mm;
+  }
+
+  .sheet-header {
+    min-height: 5.5mm;
+    margin-bottom: 1.5mm;
   }
 
   .print-page + .print-page {
     break-before: page;
     page-break-before: always;
-  }
-
-  .print-area {
-    position: static !important;
-    width: 210mm !important;
-    height: var(--print-page-h) !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    transform: none !important;
   }
 }
 
