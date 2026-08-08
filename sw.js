@@ -1,9 +1,9 @@
-const CACHE_NAME = "kanji-test-maker-cache-v3";
+const CACHE_NAME = "kanji-test-maker-cache-v4";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=3",
-  "./app.js?v=3",
+  "./styles.css?v=4",
+  "./app.js?v=4",
   "./data/kanji-writing-questions.js",
   "./manifest.webmanifest",
   "./icon.svg"
