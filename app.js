@@ -481,10 +481,30 @@ function renderEntryInputs() {
       sentenceReadingSummary.textContent = value ? "全文の読みを編集" : "全文の読みを設定（任意）";
     }, () => updateRowValidation(row, item));
     sentenceReadingInput.classList.add("sentence-reading-input");
+    sentenceReadingSummary.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || sentenceReadingDetails.open) return;
+      event.preventDefault();
+      sentenceReadingDetails.open = true;
+      sentenceReadingInput.focus();
+    });
+    sentenceReadingInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const nextTextInput = entryList.querySelector(`.entry-row[data-index="${index + 1}"] .entry-text-input`);
+      if (nextTextInput) {
+        nextTextInput.focus();
+      } else if (!addButton.disabled) {
+        addButton.focus();
+      }
+    });
 
     const sentenceReadingHint = document.createElement("span");
     sentenceReadingHint.className = "sentence-reading-hint";
-    sentenceReadingHint.textContent = "例: ぎんこうにちょきんする";
+    const sentenceReadingExample = document.createElement("span");
+    sentenceReadingExample.textContent = "例: ぎんこうにちょきんする";
+    const sentenceReadingNote = document.createElement("span");
+    sentenceReadingNote.textContent = "※ルビが不要な漢字は、漢字のまま入力";
+    sentenceReadingHint.append(sentenceReadingExample, sentenceReadingNote);
     sentenceReadingDetails.append(sentenceReadingSummary, sentenceReadingInput, sentenceReadingHint);
 
     const warning = document.createElement("p");
@@ -978,6 +998,40 @@ function containsKanji(value) {
 }
 
 function alignKanjiReadings(surface, reading) {
+  const literalKanjiRuns = Array.from(reading.matchAll(/\p{Script=Han}+/gu));
+  if (!literalKanjiRuns.length) {
+    return alignKanjiReadingSegment(surface, reading);
+  }
+
+  function alignFrom(runIndex, surfaceIndex, readingIndex) {
+    if (runIndex >= literalKanjiRuns.length) {
+      return alignKanjiReadingSegment(surface.slice(surfaceIndex), reading.slice(readingIndex));
+    }
+
+    const run = literalKanjiRuns[runIndex];
+    const literal = run[0];
+    const beforeReading = reading.slice(readingIndex, run.index);
+    let literalIndex = surface.indexOf(literal, surfaceIndex);
+
+    while (literalIndex >= 0) {
+      const beforeSurface = surface.slice(surfaceIndex, literalIndex);
+      const beforeParts = alignKanjiReadingSegment(beforeSurface, beforeReading);
+      if (beforeParts) {
+        const rest = alignFrom(runIndex + 1, literalIndex + literal.length, run.index + literal.length);
+        if (rest) {
+          return [...beforeParts, { text: literal, reading: "" }, ...rest];
+        }
+      }
+      literalIndex = surface.indexOf(literal, literalIndex + literal.length);
+    }
+
+    return null;
+  }
+
+  return alignFrom(0, 0, 0);
+}
+
+function alignKanjiReadingSegment(surface, reading) {
   const tokens = [];
   Array.from(surface).forEach((character) => {
     const isKanji = containsKanji(character);
