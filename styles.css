@@ -574,10 +574,13 @@ h2 {
 }
 
 .sheet {
+  --green: #006b2d;
+  --green-soft: rgba(0, 107, 45, 0.62);
   width: 100%;
   height: 100%;
   padding: 5mm 8mm 7mm;
   background: #ffffff;
+  color: #000000;
   font-family: var(--sheet-font);
 }
 
@@ -588,7 +591,7 @@ h2 {
   gap: 8mm;
   min-height: 6mm;
   margin-bottom: 4mm;
-  border-bottom: 0.45mm solid #3d7e5d;
+  border-bottom: 0.45mm solid #006b2d;
 }
 
 .sheet-header-spacer {
@@ -602,7 +605,7 @@ h2 {
   justify-content: center;
   gap: 3.5mm;
   min-height: 5.5mm;
-  color: #111827;
+  color: #000000;
   font-size: 2.6mm;
   font-weight: 800;
   white-space: nowrap;
@@ -724,7 +727,7 @@ h2 {
   left: 100%;
   top: 50%;
   margin-left: 0.9mm;
-  color: #111827;
+  color: #000000;
   font-size: 2.65mm;
   font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
   font-weight: 800;
@@ -762,7 +765,7 @@ h2 {
 }
 
 .answer-character {
-  fill: #111827;
+  fill: #000000;
   font-family: var(--sheet-font);
   font-size: 62px;
   font-weight: 700;
