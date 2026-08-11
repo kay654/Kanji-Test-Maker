@@ -1111,7 +1111,7 @@ function createAnswerBoxSvg(characters, includeAnswers) {
   rect.setAttribute("width", "96");
   rect.setAttribute("height", String(height - 4));
   rect.setAttribute("fill", "#ffffff");
-  rect.setAttribute("stroke", "#555555");
+  rect.setAttribute("stroke", "#000000");
   rect.setAttribute("stroke-width", "1.8");
   rect.setAttribute("vector-effect", "non-scaling-stroke");
   svg.append(rect);
@@ -1122,7 +1122,7 @@ function createAnswerBoxSvg(characters, includeAnswers) {
     line.setAttribute("x2", "98");
     line.setAttribute("y1", String(index * 100));
     line.setAttribute("y2", String(index * 100));
-    line.setAttribute("stroke", "#555555");
+    line.setAttribute("stroke", "#000000");
     line.setAttribute("stroke-width", "1.8");
     line.setAttribute("stroke-dasharray", "2.5 2.5");
     line.setAttribute("vector-effect", "non-scaling-stroke");
