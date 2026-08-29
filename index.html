@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <header class="app-header">
@@ -80,6 +80,9 @@
             </div>
           </div>
           <div class="preview-actions">
+            <button type="button" class="btn-page-settings" id="openPageSettingsButton" aria-label="用紙設定" title="用紙設定">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path></svg>
+            </button>
             <button type="button" class="btn-history" id="openHistoryButton" aria-label="履歴">
               <svg class="icon history-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 4v4h4.5"></path><path d="M11.5 7.5v5h4"></path></svg>
               <span class="button-label">履歴</span>
@@ -104,6 +107,29 @@
   </main>
 
   <div class="print-root" id="printRoot" aria-hidden="true"></div>
+
+  <div class="modal-overlay" id="pageSettingsModal" hidden>
+    <div class="page-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="pageSettingsDialogTitle">
+      <header class="dialog-header">
+        <h2 id="pageSettingsDialogTitle">用紙設定</h2>
+        <button type="button" class="dialog-close" id="closePageSettingsButton" aria-label="閉じる">×</button>
+      </header>
+
+      <section class="dialog-section">
+        <label class="footer-text-field" for="footerTextInput">
+          <span>フッターメモ</span>
+          <input type="text" id="footerTextInput" maxlength="40" autocomplete="off" aria-describedby="footerTextHelp footerTextCount">
+        </label>
+        <p class="footer-text-help" id="footerTextHelp">各ページの下端に表示します。例：問題作成日 2026年8月29日</p>
+        <p class="footer-text-count" id="footerTextCount" aria-live="polite"></p>
+      </section>
+
+      <footer class="dialog-footer">
+        <button type="button" class="btn-dialog-cancel" id="cancelPageSettingsButton">キャンセル</button>
+        <button type="button" class="btn-dialog-add" id="savePageSettingsButton">保存する</button>
+      </footer>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="historyModal" hidden>
     <div class="history-dialog" role="dialog" aria-modal="true" aria-labelledby="historyDialogTitle">
@@ -217,6 +243,6 @@
   </div>
 
   <script src="data/kanji-writing-questions.js"></script>
-  <script src="app.js?v=5" defer></script>
+  <script src="app.js?v=6" defer></script>
 </body>
 </html>

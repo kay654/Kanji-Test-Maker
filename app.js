@@ -3,6 +3,7 @@ const ITEMS_PER_PAGE = 24;
 const STORAGE_KEY = "kanji-test-maker";
 const HISTORY_STORAGE_KEY = "kanji-test-maker-print-history";
 const MAX_HISTORY_ITEMS = 100;
+const MAX_FOOTER_LENGTH = 40;
 const PREVIEW_ZOOM_STEP = 0.08;
 const PRINT_MODES = new Set(["questions", "answers", "both"]);
 
@@ -65,9 +66,17 @@ const closeCsvButton = document.getElementById("closeCsvButton");
 const cancelCsvButton = document.getElementById("cancelCsvButton");
 const downloadCsvButton = document.getElementById("downloadCsvButton");
 const importCsvButton = document.getElementById("importCsvButton");
+const openPageSettingsButton = document.getElementById("openPageSettingsButton");
+const pageSettingsModal = document.getElementById("pageSettingsModal");
+const closePageSettingsButton = document.getElementById("closePageSettingsButton");
+const cancelPageSettingsButton = document.getElementById("cancelPageSettingsButton");
+const savePageSettingsButton = document.getElementById("savePageSettingsButton");
+const footerTextInput = document.getElementById("footerTextInput");
+const footerTextCount = document.getElementById("footerTextCount");
 
 let lastFocusedElement = null;
 let printMode = "questions";
+let footerText = "";
 let pointerReorder = null;
 let selectedHistoryId = null;
 let previewZoomSteps = 0;
@@ -130,6 +139,10 @@ function clearSourceData(item) {
   });
 }
 
+function normalizeFooterText(value) {
+  return String(value || "").replace(/[\r\n]+/g, " ").slice(0, MAX_FOOTER_LENGTH);
+}
+
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
@@ -139,6 +152,7 @@ function loadState() {
     if (PRINT_MODES.has(saved.printMode)) {
       printMode = saved.printMode;
     }
+    footerText = normalizeFooterText(saved.footerText);
   } catch {}
 
   if (!items.length) {
@@ -147,7 +161,7 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ items, printMode }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ items, printMode, footerText }));
 }
 
 function loadPrintHistory() {
@@ -160,7 +174,8 @@ function loadPrintHistory() {
       .map((entry) => ({
         id: entry.id,
         printedAt: String(entry.printedAt || ""),
-        items: entry.items.slice(0, MAX_ITEMS).map(normalizeItem).filter(isActiveItem)
+        items: entry.items.slice(0, MAX_ITEMS).map(normalizeItem).filter(isActiveItem),
+        footerText: normalizeFooterText(entry.footerText)
       }))
       .filter((entry) => entry.items.length);
   } catch {
@@ -201,7 +216,8 @@ function saveCurrentPrintHistory() {
   history.unshift({
     id: createHistoryId(),
     printedAt: new Date().toISOString(),
-    items: historyItems
+    items: historyItems,
+    footerText
   });
   savePrintHistory(history);
 }
@@ -315,6 +331,7 @@ function restoreSelectedPrintHistory() {
 
   items = entry.items.map((item) => normalizeItem(item));
   if (!items.length) items = [createEmptyItem()];
+  footerText = normalizeFooterText(entry.footerText);
   renderEntryInputs();
   updateAll();
   closeHistoryDialog();
@@ -327,6 +344,28 @@ function openHistoryDialog() {
   showModal(historyModal);
   const firstChoice = historyList.querySelector(".history-choice");
   (firstChoice || closeHistoryButton).focus();
+}
+
+function updateFooterTextCount() {
+  footerTextCount.textContent = `${Array.from(footerTextInput.value).length} / ${MAX_FOOTER_LENGTH}文字`;
+}
+
+function openPageSettingsDialog() {
+  footerTextInput.value = footerText;
+  updateFooterTextCount();
+  showModal(pageSettingsModal);
+  footerTextInput.focus();
+  footerTextInput.select();
+}
+
+function closePageSettingsDialog() {
+  hideModal(pageSettingsModal);
+}
+
+function savePageSettings() {
+  footerText = normalizeFooterText(footerTextInput.value);
+  closePageSettingsDialog();
+  updateAll();
 }
 
 function closeHistoryDialog() {
@@ -706,9 +745,17 @@ function createSheet(pageItems, pageIndex, includeAnswers, pageTypeLabel) {
   const sheet = document.createElement("article");
   sheet.className = "sheet";
   sheet.setAttribute("aria-label", `漢字テスト ${pageTypeLabel} ${pageIndex + 1}ページ`);
-  sheet.append(createSheetHeader(), createQuestionGrid(pageItems, pageIndex, includeAnswers));
+  sheet.append(createSheetHeader(), createQuestionGrid(pageItems, pageIndex, includeAnswers), createSheetFooter());
   printArea.append(sheet);
   return printArea;
+}
+
+function createSheetFooter() {
+  const footer = document.createElement("footer");
+  footer.className = "sheet-footer";
+  footer.textContent = footerText;
+  footer.hidden = !footerText;
+  return footer;
 }
 
 function createSheetHeader() {
@@ -1295,6 +1342,7 @@ function addItem() {
 function resetAll() {
   items = [createEmptyItem()];
   printMode = "questions";
+  footerText = "";
   renderEntryInputs();
   updateAll();
 }
@@ -1663,6 +1711,11 @@ async function printSheets() {
 }
 
 addButton.addEventListener("click", addItem);
+openPageSettingsButton.addEventListener("click", openPageSettingsDialog);
+closePageSettingsButton.addEventListener("click", closePageSettingsDialog);
+cancelPageSettingsButton.addEventListener("click", closePageSettingsDialog);
+savePageSettingsButton.addEventListener("click", savePageSettings);
+footerTextInput.addEventListener("input", updateFooterTextCount);
 openKanjiSelectButton.addEventListener("click", openKanjiSelectDialog);
 openRandomButton.addEventListener("click", openRandomDialog);
 openDataButton.addEventListener("click", openCsvDialog);
@@ -1688,6 +1741,7 @@ printModeSelect.addEventListener("change", () => {
   saveState();
 });
 const modalDialogs = [
+  [pageSettingsModal, closePageSettingsDialog],
   [historyModal, closeHistoryDialog],
   [kanjiSelectModal, closeKanjiSelectDialog],
   [randomModal, closeRandomDialog],
