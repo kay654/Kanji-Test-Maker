@@ -421,10 +421,13 @@ function getPrintModeLabel() {
 
 function updatePrintControls() {
   printModeSelect.value = printMode;
-  const basePageCount = splitPages(getActiveItems()).length;
-  const totalPageCount = printMode === "both" ? basePageCount * 2 : basePageCount;
-  const pageLabel = `${totalPageCount}ページ`;
+  const pageLabel = `${getPrintPageCount()}ページ`;
   printButton.setAttribute("aria-label", `${getPrintModeLabel()}を印刷する（${pageLabel}）`);
+}
+
+function getPrintPageCount() {
+  const basePageCount = splitPages(getActiveItems()).length;
+  return printMode === "both" ? basePageCount * 2 : basePageCount;
 }
 
 function renderEntryInputs() {
@@ -1168,6 +1171,9 @@ function downloadCsvFile() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+  // Blob URLs do not include the .csv extension that GA4 enhanced measurement
+  // uses to identify downloads, so send the standard event once here.
+  trackEvent("file_download", { file_name: "kanji-test.csv", file_extension: "csv" });
   csvMessage.textContent = "CSVファイルをダウンロードしました。";
 }
 
@@ -1400,6 +1406,7 @@ async function printSheets() {
   trackEvent("print", {
     content_type: "worksheet",
     item_count: getActiveItems().length,
+    page_count: getPrintPageCount(),
     print_mode: printMode
   });
   document.body.classList.add("is-printing");
