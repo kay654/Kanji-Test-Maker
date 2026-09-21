@@ -7,6 +7,14 @@ const MAX_HISTORY_ITEMS = 100;
 const MAX_FOOTER_LENGTH = 40;
 const PREVIEW_ZOOM_STEP = 0.08;
 const PRINT_MODES = new Set(["questions", "answers", "both"]);
+const APP_NAME = "kanji_test_maker";
+
+// Send only aggregate, non-identifying data about completed core actions.
+// `gtag` is loaded independently, so the app must also work when it is blocked.
+function trackEvent(name, parameters = {}) {
+  if (typeof window.gtag !== "function") return;
+  window.gtag("event", name, { app_name: APP_NAME, ...parameters });
+}
 
 const DEFAULT_ITEMS = [
   { text: "", kanji: "", reading: "", sentenceReading: "" }
@@ -1134,6 +1142,7 @@ function importCsvItems() {
     items = importedItems;
     renderEntryInputs();
     updateAll();
+    trackEvent("import", { content_type: "worksheet", import_format: "csv", item_count: importedItems.length });
     closeCsvDialog();
   } catch (error) {
     csvMessage.textContent = error instanceof Error ? error.message : "CSVを読み込めませんでした。";
@@ -1251,6 +1260,7 @@ function addKanjiChoice(entry) {
 
   renderEntryInputs();
   updateAll();
+  trackEvent("select_content", { content_type: "kanji_example" });
   closeKanjiSelectDialog();
 }
 
@@ -1369,6 +1379,13 @@ function generateRandomItems() {
   }
   renderEntryInputs();
   updateAll();
+  trackEvent("generate_content", {
+    content_type: "worksheet",
+    generation_method: "random",
+    grade,
+    item_count: generatedItems.length,
+    update_mode: mode
+  });
   closeRandomDialog();
 }
 
@@ -1380,6 +1397,11 @@ function cleanupPrintMode() {
 
 async function printSheets() {
   saveCurrentPrintHistory();
+  trackEvent("print", {
+    content_type: "worksheet",
+    item_count: getActiveItems().length,
+    print_mode: printMode
+  });
   document.body.classList.add("is-printing");
   if (document.fonts) {
     await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 1200))]);
