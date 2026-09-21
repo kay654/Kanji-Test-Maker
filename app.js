@@ -1,3 +1,4 @@
+const { getManualReadingParts, sliceCodePoints, findAllIndexes, containsKanji, alignKanjiReadings, alignKanjiReadingSegment, katakanaToHiragana } = KanjiReadings;
 const MAX_ITEMS = 48;
 const ITEMS_PER_PAGE = 24;
 const STORAGE_KEY = "kanji-test-maker";
@@ -12,19 +13,6 @@ const DEFAULT_ITEMS = [
 ];
 
 let items = DEFAULT_ITEMS.map((item) => ({ ...item }));
-
-const SOURCE_TEXT_FIELDS = [
-  "sourceWord",
-  "sourceWordReading",
-  "sourceTargetReading"
-];
-
-const SOURCE_FIELDS = [
-  ...SOURCE_TEXT_FIELDS,
-  "sourceTargetSpan",
-  "sourceWordSpan",
-  "sourceReadingSegments"
-];
 
 const entryList = document.getElementById("entryList");
 const reorderStatus = document.getElementById("reorderStatus");
@@ -99,44 +87,32 @@ function createEmptyItem() {
   return { text: "", kanji: "", reading: "", sentenceReading: "" };
 }
 
+// Upgrade old saved presets once. All editing and rendering then use the same four fields.
+function legacySentenceReading(item) {
+  const text = String(item.text || "");
+  if (Array.isArray(item.sourceReadingSegments) && item.sourceReadingSegments.length) {
+    let cursor = 0;
+    let result = "";
+    for (const segment of item.sourceReadingSegments) {
+      const start = segment.start ?? cursor;
+      if (start !== cursor || !Number.isInteger(segment.length) || segment.length < 1) return "";
+      cursor += segment.length;
+      result += segment.reading ?? sliceCodePoints(text, start, cursor);
+    }
+    if (cursor === Array.from(text).length) return result;
+  }
+  const word = String(item.sourceWord || "");
+  const wordReading = String(item.sourceWordReading || "");
+  return word && wordReading && text.includes(word) ? text.replace(word, wordReading) : "";
+}
+
 function normalizeItem(item) {
-  const normalized = {
+  return {
     text: String(item.text || ""),
     kanji: String(item.kanji || ""),
     reading: String(item.reading || ""),
-    sentenceReading: String(item.sentenceReading || "")
+    sentenceReading: String(item.sentenceReading || legacySentenceReading(item))
   };
-
-  SOURCE_TEXT_FIELDS.forEach((field) => {
-    if (item[field] !== undefined && item[field] !== null && item[field] !== "") {
-      normalized[field] = String(item[field]);
-    }
-  });
-
-  ["sourceTargetSpan", "sourceWordSpan"].forEach((field) => {
-    const span = item[field];
-    if (span && Number.isInteger(span.start) && Number.isInteger(span.length)) {
-      normalized[field] = { start: span.start, length: span.length };
-    }
-  });
-
-  if (Array.isArray(item.sourceReadingSegments)) {
-    normalized.sourceReadingSegments = item.sourceReadingSegments
-      .filter((segment) => segment && Number.isInteger(segment.start) && Number.isInteger(segment.length))
-      .map((segment) => ({
-        start: segment.start,
-        length: segment.length,
-        reading: String(segment.reading || "")
-      }));
-  }
-
-  return normalized;
-}
-
-function clearSourceData(item) {
-  SOURCE_FIELDS.forEach((field) => {
-    delete item[field];
-  });
 }
 
 function normalizeFooterText(value) {
@@ -407,7 +383,6 @@ function getSentenceReadingWarning(item) {
 
 function shouldOfferSentenceReading(item) {
   if (String(item.sentenceReading || "").trim()) return true;
-  if (Array.isArray(item.sourceReadingSegments) && item.sourceReadingSegments.length) return false;
 
   const text = item.text.trim();
   const kanji = item.kanji.trim();
@@ -475,17 +450,14 @@ function renderEntryInputs() {
 
     const textInput = createInput(item.text, "問題文", 18, (value) => {
       item.text = value;
-      clearSourceData(item);
     }, () => updateRowValidation(row, item));
     textInput.classList.add("entry-text-input", "entry-main-input");
     const kanjiInput = createInput(item.kanji, "問題の漢字", 4, (value) => {
       item.kanji = value;
-      clearSourceData(item);
     }, () => updateRowValidation(row, item));
     kanjiInput.classList.add("entry-main-input");
     const readingInput = createInput(item.reading, "よみがな", 12, (value) => {
       item.reading = value;
-      clearSourceData(item);
     }, () => updateRowValidation(row, item));
     readingInput.classList.add("entry-main-input");
 
@@ -824,16 +796,6 @@ function buildSentence(item, includeAnswers) {
     return parts;
   }
 
-  const datasetParts = buildDatasetSentence(item, text, target, reading, includeAnswers);
-  if (datasetParts) {
-    return datasetParts;
-  }
-
-  const sourceParts = buildSourceWordSentence(item, text, target, reading, includeAnswers);
-  if (sourceParts) {
-    return sourceParts;
-  }
-
   const index = target ? text.indexOf(target) : -1;
 
   if (index >= 0) {
@@ -848,178 +810,6 @@ function buildSentence(item, includeAnswers) {
   }
 
   return parts;
-}
-
-function getManualReadingParts(item, text, target, targetReading) {
-  const sentenceReading = String(item.sentenceReading || "").trim();
-  if (!sentenceReading || !text || !target || !targetReading) return null;
-
-  const alignedParts = alignKanjiReadings(text, sentenceReading);
-  const targetStringIndex = text.indexOf(target);
-  if (!alignedParts || targetStringIndex < 0) return null;
-
-  const targetStart = Array.from(text.slice(0, targetStringIndex)).length;
-  const targetLength = Array.from(target).length;
-  const targetEnd = targetStart + targetLength;
-  const result = [];
-  let cursor = 0;
-  let renderedTarget = false;
-
-  for (const part of alignedParts) {
-    const partLength = Array.from(part.text).length;
-    const partEnd = cursor + partLength;
-    if (targetEnd <= cursor || targetStart >= partEnd) {
-      result.push(part);
-    } else {
-      if (targetStart < cursor || targetEnd > partEnd || renderedTarget || !part.reading) return null;
-
-      const localTargetStart = targetStart - cursor;
-      const beforeTarget = sliceCodePoints(part.text, 0, localTargetStart);
-      const afterTarget = sliceCodePoints(part.text, localTargetStart + targetLength, partLength);
-      const splitReading = splitSourceWordReading(part.text, part.reading, target, targetReading);
-      if (!splitReading) return null;
-
-      if (beforeTarget) result.push({ text: beforeTarget, reading: splitReading.before });
-      result.push({ isTarget: true });
-      if (afterTarget) result.push({ text: afterTarget, reading: splitReading.after });
-      renderedTarget = true;
-    }
-    cursor = partEnd;
-  }
-
-  return renderedTarget ? result : null;
-}
-
-function buildDatasetSentence(item, text, target, reading, includeAnswers) {
-  const segments = item.sourceReadingSegments;
-  const targetSpan = item.sourceTargetSpan;
-  if (!Array.isArray(segments) || !targetSpan) return null;
-
-  const characters = Array.from(text);
-  const targetStart = targetSpan.start;
-  const targetEnd = targetStart + targetSpan.length;
-  if (
-    !Number.isInteger(targetStart)
-    || !Number.isInteger(targetSpan.length)
-    || targetSpan.length < 1
-    || sliceCodePoints(text, targetStart, targetEnd) !== target
-  ) {
-    return null;
-  }
-
-  const parts = [];
-  let cursor = 0;
-  let renderedTarget = false;
-
-  for (const segment of segments) {
-    const segmentStart = segment.start;
-    const segmentEnd = segmentStart + segment.length;
-    const segmentReading = String(segment.reading || "").trim();
-    if (
-      segmentStart !== cursor
-      || segment.length < 1
-      || segmentEnd > characters.length
-      || !segmentReading
-    ) {
-      return null;
-    }
-
-    const surface = characters.slice(segmentStart, segmentEnd).join("");
-    if (targetEnd <= segmentStart || targetStart >= segmentEnd) {
-      appendTextPart(parts, surface, segmentReading);
-    } else {
-      if (targetStart < segmentStart || targetEnd > segmentEnd || renderedTarget) return null;
-
-      const localTargetStart = targetStart - segmentStart;
-      const beforeTarget = Array.from(surface).slice(0, localTargetStart).join("");
-      const afterTarget = Array.from(surface).slice(localTargetStart + targetSpan.length).join("");
-      const splitReading = splitSourceWordReading(surface, segmentReading, target, reading);
-      if (!splitReading) return null;
-
-      appendTextPart(parts, beforeTarget, splitReading.before);
-      parts.push(answerBoxes(target, reading, includeAnswers));
-      appendTextPart(parts, afterTarget, splitReading.after);
-      renderedTarget = true;
-    }
-
-    cursor = segmentEnd;
-  }
-
-  return cursor === characters.length && renderedTarget ? parts : null;
-}
-
-function sliceCodePoints(value, start, end) {
-  return Array.from(value).slice(start, end).join("");
-}
-
-function buildSourceWordSentence(item, text, target, reading, includeAnswers) {
-  const sourceWord = String(item.sourceWord || "").trim();
-  const wordReading = String(item.sourceWordReading || "").trim();
-  const targetReading = String(item.sourceTargetReading || reading || "").trim();
-  if (!text || !target || !sourceWord || !wordReading || !targetReading) return null;
-
-  const wordIndex = text.indexOf(sourceWord);
-  const targetIndex = sourceWord.indexOf(target);
-  if (wordIndex < 0 || targetIndex < 0) return null;
-
-  const splitReading = splitSourceWordReading(sourceWord, wordReading, target, targetReading);
-  if (!splitReading) return null;
-
-  const beforeText = text.slice(0, wordIndex);
-  const beforeTarget = sourceWord.slice(0, targetIndex);
-  const afterTarget = sourceWord.slice(targetIndex + target.length);
-  const afterText = text.slice(wordIndex + sourceWord.length);
-  const parts = [];
-
-  appendTextPart(parts, beforeText);
-  appendTextPart(parts, beforeTarget, splitReading.before);
-  parts.push(answerBoxes(target, reading, includeAnswers));
-  appendTextPart(parts, afterTarget, splitReading.after);
-  appendTextPart(parts, afterText);
-
-  return parts;
-}
-
-function splitSourceWordReading(word, wordReading, target, targetReading) {
-  const targetIndex = word.indexOf(target);
-  const targetEndsWord = targetIndex + target.length === word.length;
-
-  if (targetIndex === 0 && wordReading.startsWith(targetReading)) {
-    return {
-      before: "",
-      after: wordReading.slice(targetReading.length)
-    };
-  }
-
-  if (targetEndsWord && wordReading.endsWith(targetReading)) {
-    return {
-      before: wordReading.slice(0, wordReading.length - targetReading.length),
-      after: ""
-    };
-  }
-
-  const readingIndexes = findAllIndexes(wordReading, targetReading);
-  if (!readingIndexes.length) return null;
-
-  let readingIndex = readingIndexes[0];
-  if (readingIndexes.length > 1) {
-    const precedingKanjiCount = Array.from(word.slice(0, targetIndex)).filter(containsKanji).length;
-    readingIndex = readingIndexes[Math.min(precedingKanjiCount, readingIndexes.length - 1)];
-  }
-  return {
-    before: wordReading.slice(0, readingIndex),
-    after: wordReading.slice(readingIndex + targetReading.length)
-  };
-}
-
-function findAllIndexes(value, search) {
-  const indexes = [];
-  let index = value.indexOf(search);
-  while (index >= 0) {
-    indexes.push(index);
-    index = value.indexOf(search, index + search.length);
-  }
-  return indexes;
 }
 
 function appendTextPart(parts, value, reading = "") {
@@ -1038,118 +828,6 @@ function appendTextPart(parts, value, reading = "") {
   alignedParts.forEach((part) => {
     parts.push(part.reading ? rubyTextSpan(part.text, part.reading) : textSpan(part.text));
   });
-}
-
-function containsKanji(value) {
-  return /\p{Script=Han}/u.test(value);
-}
-
-function alignKanjiReadings(surface, reading) {
-  const literalKanjiRuns = Array.from(reading.matchAll(/\p{Script=Han}+/gu));
-  if (!literalKanjiRuns.length) {
-    return alignKanjiReadingSegment(surface, reading);
-  }
-
-  function alignFrom(runIndex, surfaceIndex, readingIndex) {
-    if (runIndex >= literalKanjiRuns.length) {
-      return alignKanjiReadingSegment(surface.slice(surfaceIndex), reading.slice(readingIndex));
-    }
-
-    const run = literalKanjiRuns[runIndex];
-    const literal = run[0];
-    const beforeReading = reading.slice(readingIndex, run.index);
-    let literalIndex = surface.indexOf(literal, surfaceIndex);
-
-    while (literalIndex >= 0) {
-      const beforeSurface = surface.slice(surfaceIndex, literalIndex);
-      const beforeParts = alignKanjiReadingSegment(beforeSurface, beforeReading);
-      if (beforeParts) {
-        const rest = alignFrom(runIndex + 1, literalIndex + literal.length, run.index + literal.length);
-        if (rest) {
-          return [...beforeParts, { text: literal, reading: "" }, ...rest];
-        }
-      }
-      literalIndex = surface.indexOf(literal, literalIndex + literal.length);
-    }
-
-    return null;
-  }
-
-  return alignFrom(0, 0, 0);
-}
-
-function alignKanjiReadingSegment(surface, reading) {
-  const tokens = [];
-  Array.from(surface).forEach((character) => {
-    const isKanji = containsKanji(character);
-    const previous = tokens[tokens.length - 1];
-    if (previous && previous.isKanji === isKanji) {
-      previous.text += character;
-    } else {
-      tokens.push({ text: character, isKanji });
-    }
-  });
-
-  const normalizedReading = katakanaToHiragana(reading);
-  const memo = new Map();
-
-  function align(tokenIndex, readingIndex) {
-    const key = `${tokenIndex}:${readingIndex}`;
-    if (memo.has(key)) return memo.get(key);
-
-    if (tokenIndex === tokens.length) {
-      return readingIndex === normalizedReading.length ? [] : null;
-    }
-
-    const token = tokens[tokenIndex];
-    if (!token.isKanji) {
-      const expected = katakanaToHiragana(token.text);
-      const candidateIndexes = [readingIndex];
-      if (tokenIndex === 0 && !normalizedReading.startsWith(expected, readingIndex)) {
-        let candidate = normalizedReading.indexOf(expected, readingIndex + 1);
-        while (candidate >= 0) {
-          candidateIndexes.push(candidate);
-          candidate = normalizedReading.indexOf(expected, candidate + 1);
-        }
-      }
-
-      for (const candidateIndex of candidateIndexes) {
-        if (!normalizedReading.startsWith(expected, candidateIndex)) continue;
-        const rest = align(tokenIndex + 1, candidateIndex + expected.length);
-        if (rest) {
-          const result = [{ text: token.text, reading: "" }, ...rest];
-          memo.set(key, result);
-          return result;
-        }
-      }
-
-      memo.set(key, null);
-      return null;
-    }
-
-    for (let end = readingIndex + 1; end <= normalizedReading.length; end += 1) {
-      const rest = align(tokenIndex + 1, end);
-      if (rest) {
-        const result = [{ text: token.text, reading: reading.slice(readingIndex, end) }, ...rest];
-        memo.set(key, result);
-        return result;
-      }
-    }
-
-    memo.set(key, null);
-    return null;
-  }
-
-  return align(0, 0);
-}
-
-function katakanaToHiragana(value) {
-  return Array.from(value).map((character) => {
-    const codePoint = character.codePointAt(0);
-    return codePoint >= 0x30A1 && codePoint <= 0x30F6
-      ? String.fromCodePoint(codePoint - 0x60)
-      : character;
-  }).join("");
 }
 
 function textSpan(value) {
@@ -1528,7 +1206,7 @@ function renderKanjiChoices() {
 
     const meta = document.createElement("span");
     meta.className = "kanji-choice-meta";
-    meta.textContent = `${entry.grade}年・${entry.word}（${entry.wordReading}）`;
+    meta.textContent = `${entry.grade}年・${entry.word}`;
 
     const action = document.createElement("span");
     action.className = "kanji-choice-action";
@@ -1605,30 +1283,32 @@ function normalizeRandomCount() {
 function getKanjiData() {
   const dataset = window.KANJI_WRITING_QUESTION_DATASET;
   if (!dataset || !Array.isArray(dataset.grades)) return [];
-
-  return dataset.grades.flatMap((group) => {
-    if (!Array.isArray(group.questions)) return [];
-    return group.questions
-      .filter((question) => question.isActive)
-      .map((question) => ({ ...question, grade: Number(group.grade) }));
-  });
+  return dataset.grades.flatMap((group) => (group.questions || [])
+    .filter((question) => question && question.isActive !== false)
+    .map((question) => {
+      if (question.sentenceReading !== undefined) return { ...question, grade: Number(group.grade) };
+      // Compatibility with the previous bundled format.
+      let cursor = 0;
+      const segments = (question.readingSegments || []).map((segment) => {
+        const start = segment.start ?? cursor;
+        cursor = start + segment.length;
+        return { ...segment, start, reading: segment.reading ?? sliceCodePoints(question.sentence, start, cursor) };
+      });
+      return {
+        ...question,
+        grade: Number(group.grade),
+        sentenceReading: legacySentenceReading({text:question.sentence,sourceReadingSegments:segments,
+          sourceWord:question.word,sourceWordReading:question.wordReading})
+      };
+    }));
 }
 
 function createItemFromKanjiEntry(entry) {
-  const kanji = String(entry.targetKanji || "");
-  const exampleSentence = String(entry.sentence || "");
-  const word = String(entry.word || "");
-  const text = exampleSentence.includes(word) ? exampleSentence : word;
   return normalizeItem({
-    text,
-    kanji,
-    reading: String(entry.targetReading || ""),
-    sourceWord: word,
-    sourceWordReading: String(entry.wordReading || ""),
-    sourceTargetReading: String(entry.targetReading || ""),
-    sourceTargetSpan: entry.targetSpan,
-    sourceWordSpan: entry.wordSpan,
-    sourceReadingSegments: entry.readingSegments
+    text: entry.sentence,
+    kanji: entry.targetKanji,
+    reading: entry.targetReading,
+    sentenceReading: entry.sentenceReading
   });
 }
 
@@ -1655,7 +1335,7 @@ function generateRandomItems() {
 
   const candidates = data
     .filter((entry) => Number(entry.grade) === grade)
-    .filter((entry) => entry.word && entry.wordReading && entry.targetKanji)
+    .filter((entry) => entry.word && entry.sentenceReading && entry.targetKanji)
     .map(createItemFromKanjiEntry)
     .filter((item) => item.text.includes(item.kanji));
 
