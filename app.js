@@ -9,11 +9,66 @@ const PREVIEW_ZOOM_STEP = 0.08;
 const PRINT_MODES = new Set(["questions", "answers", "both"]);
 const APP_NAME = "kanji_test_maker";
 
-// Send only aggregate, non-identifying data about completed core actions.
-// `gtag` is loaded independently, so the app must also work when it is blocked.
-function trackEvent(name, parameters = {}) {
-  if (typeof window.gtag !== "function") return;
-  window.gtag("event", name, { app_name: APP_NAME, ...parameters });
+const analyticsEvents = {
+  app_use: {
+    usage_action: (value) => ["edit", "select", "import", "generate", "restore", "print", "download"].includes(value)
+  },
+  import: {
+    content_type: (value) => value === "worksheet",
+    import_format: (value) => value === "csv",
+    item_count: isAnalyticsCount
+  },
+  select_content: { content_type: (value) => value === "kanji_example" },
+  generate_content: {
+    content_type: (value) => value === "worksheet",
+    generation_method: (value) => value === "random",
+    grade: isAnalyticsGrade,
+    content_grade: isAnalyticsGrade,
+    item_count: isAnalyticsCount,
+    update_mode: (value) => ["append", "replace"].includes(value)
+  },
+  print: {
+    content_type: (value) => value === "worksheet",
+    item_count: isAnalyticsCount,
+    page_count: isAnalyticsCount,
+    print_mode: (value) => PRINT_MODES.has(value)
+  },
+  file_download: {
+    file_name: (value) => value === "kanji-test.csv",
+    file_extension: (value) => value === "csv"
+  }
+};
+
+function isAnalyticsGrade(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 6;
+}
+
+let analyticsUsed = false;
+
+function isAnalyticsCount(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function trackEvent(name, parameters) {
+  try {
+    if (!Object.prototype.hasOwnProperty.call(analyticsEvents, name)) return;
+    if (typeof window.gtag !== "function") return;
+    const allowed = {};
+    for (const [key, valid] of Object.entries(analyticsEvents[name])) {
+      if (valid(parameters[key])) allowed[key] = parameters[key];
+    }
+    window.gtag("event", name, {
+      ...allowed, app_name: APP_NAME, app_key: APP_NAME, content_group: APP_NAME
+    });
+  } catch {
+    // Analytics must not interrupt editing or output.
+  }
+}
+
+function markUsed(action) {
+  if (analyticsUsed) return;
+  analyticsUsed = true;
+  trackEvent("app_use", { usage_action: action });
 }
 
 const DEFAULT_ITEMS = [
@@ -318,6 +373,7 @@ function restoreSelectedPrintHistory() {
   footerText = normalizeFooterText(entry.footerText);
   renderEntryInputs();
   updateAll();
+  if (getActiveItems().length > 0) markUsed("restore");
   closeHistoryDialog();
 }
 
@@ -702,10 +758,30 @@ function createInput(value, label, maxLength, onChange, onInput) {
   input.maxLength = maxLength;
   input.placeholder = label;
   input.setAttribute("aria-label", label);
-  input.addEventListener("input", () => {
+  let committedValue = value.trim();
+  let composing = false;
+  let appliedValue = value;
+  const markEdit = () => {
+    if (input.value !== appliedValue) return;
+    const value = appliedValue.trim();
+    if (value === committedValue) return;
+    committedValue = value;
+    if (value && getActiveItems().length > 0) markUsed("edit");
+  };
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => {
+    composing = false;
+    markEdit();
+  });
+  input.addEventListener("input", (event) => {
     onChange(input.value);
     onInput?.();
     updateAll();
+    appliedValue = input.value;
+    if (!composing && !event.isComposing) markEdit();
+  });
+  input.addEventListener("change", () => {
+    if (!composing) markEdit();
   });
   input.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || !input.classList.contains("entry-main-input")) return;
@@ -1145,6 +1221,7 @@ function importCsvItems() {
     items = importedItems;
     renderEntryInputs();
     updateAll();
+    if (getActiveItems().length > 0) markUsed("import");
     trackEvent("import", { content_type: "worksheet", import_format: "csv", item_count: importedItems.length });
     closeCsvDialog();
   } catch (error) {
@@ -1173,8 +1250,19 @@ function downloadCsvFile() {
   URL.revokeObjectURL(url);
   // Blob URLs do not include the .csv extension that GA4 enhanced measurement
   // uses to identify downloads, so send the standard event once here.
-  trackEvent("file_download", { file_name: "kanji-test.csv", file_extension: "csv" });
   csvMessage.textContent = "CSVファイルをダウンロードしました。";
+  trackCsvDownload(csv);
+}
+
+function trackCsvDownload(csv) {
+  try {
+    if (!csvRowsToItems(parseCsv(csv)).some((item) => !getItemError(item))) return;
+  } catch {
+    // Unparseable text can still be downloaded, but contains no countable worksheet.
+    return;
+  }
+  markUsed("download");
+  trackEvent("file_download", { file_name: "kanji-test.csv", file_extension: "csv" });
 }
 
 function openKanjiSelectDialog() {
@@ -1266,6 +1354,7 @@ function addKanjiChoice(entry) {
 
   renderEntryInputs();
   updateAll();
+  if (getActiveItems().length > 0) markUsed("select");
   trackEvent("select_content", { content_type: "kanji_example" });
   closeKanjiSelectDialog();
 }
@@ -1385,10 +1474,12 @@ function generateRandomItems() {
   }
   renderEntryInputs();
   updateAll();
+  if (getActiveItems().length > 0) markUsed("generate");
   trackEvent("generate_content", {
     content_type: "worksheet",
     generation_method: "random",
     grade,
+    content_grade: grade,
     item_count: generatedItems.length,
     update_mode: mode
   });
@@ -1403,12 +1494,6 @@ function cleanupPrintMode() {
 
 async function printSheets() {
   saveCurrentPrintHistory();
-  trackEvent("print", {
-    content_type: "worksheet",
-    item_count: getActiveItems().length,
-    page_count: getPrintPageCount(),
-    print_mode: printMode
-  });
   document.body.classList.add("is-printing");
   if (document.fonts) {
     await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 1200))]);
@@ -1416,7 +1501,19 @@ async function printSheets() {
   window.addEventListener("afterprint", cleanupPrintMode, { once: true });
   window.addEventListener("focus", cleanupPrintMode, { once: true });
   setTimeout(cleanupPrintMode, 10000);
-  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const itemCount = getActiveItems().length;
+    if (itemCount > 0 && typeof window.print === "function") {
+      markUsed("print");
+      trackEvent("print", {
+        content_type: "worksheet",
+        item_count: itemCount,
+        page_count: getPrintPageCount(),
+        print_mode: printMode
+      });
+    }
+    window.print();
+  }));
 }
 
 addButton.addEventListener("click", addItem);
